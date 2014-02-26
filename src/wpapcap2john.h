@@ -21,22 +21,34 @@ typedef   signed char      int8;
 // and do not load structures record by record.
 #pragma pack(1)
 
+// Borrowed from cap2hccap's pcap.h
+#define TCPDUMP_MAGIC           0xA1B2C3D4
+#define TCPDUMP_CIGAM           0xD4C3B2A1
+#define IVSONLY_MAGIC           "\xBF\xCA\x84\xD4"
+#define IVS2_MAGIC              "\xAE\x78\xD1\xFF"
+
+#define LINKTYPE_ETHERNET       1
+#define LINKTYPE_IEEE802_11     105
+#define LINKTYPE_PRISM_HEADER   119
+#define LINKTYPE_RADIOTAP_HDR   127
+#define LINKTYPE_PPI_HDR        192
+
 // PCAP main file header
 typedef struct pcap_hdr_s {
-    uint32 magic_number;   /* magic number 0xA1B2C3D4 (or 0xD4C3B2A1 if file in BE format) */
-    uint16 version_major;  /* major version number 0x0200 */
-    uint16 version_minor;  /* minor version number 0x0400 */
-    int32  thiszone;       /* GMT to local correction */
-    uint32 sigfigs;        /* accuracy of timestamps */
-    uint32 snaplen;        /* max length of captured packets, in octets */
-    uint32 network;        /* data link type */
+	uint32 magic_number;   /* magic number 0xA1B2C3D4 (or 0xD4C3B2A1 if file in BE format) */
+	uint16 version_major;  /* major version number 0x0200 */
+	uint16 version_minor;  /* minor version number 0x0400 */
+	int32  thiszone;       /* GMT to local correction */
+	uint32 sigfigs;        /* accuracy of timestamps */
+	uint32 snaplen;        /* max length of captured packets, in octets */
+	uint32 network;        /* data link type */
 } pcap_hdr_t;
 // PCAP packet header
 typedef struct pcaprec_hdr_s {
-    uint32 ts_sec;         /* timestamp seconds */
-    uint32 ts_usec;        /* timestamp microseconds */
-    uint32 incl_len;       /* number of octets of packet saved in file */
-    uint32 orig_len;       /* actual length of packet */
+	uint32 ts_sec;         /* timestamp seconds */
+	uint32 ts_usec;        /* timestamp microseconds */
+	uint32 incl_len;       /* number of octets of packet saved in file */
+	uint32 orig_len;       /* actual length of packet */
 } pcaprec_hdr_t;
 
 // Ok, here are the struct we need to decode 802.11 for JtR
@@ -175,13 +187,13 @@ typedef struct WPA4way_s {
 // this struct IS the struct in JtR. So we load it up, the do a base-64 convert to save.
 typedef struct
 {
-  char          essid[36];  // Note, we do not 'write' this one, it is the salt.
-  unsigned char mac1[6];    // the base-64 data we write, starts from this element forward.
-  unsigned char mac2[6];
-  unsigned char nonce1[32];
-  unsigned char nonce2[32];
-  unsigned char eapol[256];
-  int           eapol_size;
-  int           keyver;
-  unsigned char keymic[16];
+	char          essid[36];  // Note, we do not 'write' this one, it is the salt.
+	unsigned char mac1[6];    // the base-64 data we write, starts from this element forward.
+	unsigned char mac2[6];
+	unsigned char nonce1[32];
+	unsigned char nonce2[32];
+	unsigned char eapol[256];
+	int           eapol_size;
+	int           keyver;
+	unsigned char keymic[16];
 } hccap_t;

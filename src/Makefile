@@ -145,7 +145,7 @@ JOHN_OBJS = \
 	unrarcmd.o unrarfilter.o unrarhlp.o unrar.o unrarppm.o unrarvm.o \
 	rar_fmt.o rar2john.o \
 	rawSHA0_fmt.o \
-	zip2john.o gladman_hmac.o gladman_pwd2key.o \
+	zip_fmt.o zip2john.o gladman_hmac.o gladman_pwd2key.o \
 	racf2john.o \
 	keychain2john.o \
 	kwallet2john.o \
@@ -177,8 +177,6 @@ JOHN_OBJS = \
 	unafs.o \
 	undrop.o \
 	unique.o putty2john.o gpg2john.o memdbg.o
-# broken:
-# zip_fmt.o
 
 OCL_OBJS = \
 	common-opencl.o common_opencl_pbkdf2.o opencl_mysqlsha1_fmt.o \
@@ -187,7 +185,7 @@ OCL_OBJS = \
 	opencl_cryptsha512_fmt.o opencl_mscash2_fmt.o opencl_wpapsk_fmt.o \
 	opencl_xsha512_fmt.o opencl_rawsha512_fmt.o opencl_bf_std.o \
 	opencl_bf_fmt.o opencl_pwsafe_fmt.o opencl_rawmd4_fmt.o \
-	opencl_keychain_fmt.o opencl_agilekeychain_fmt.o \
+	opencl_keychain_fmt.o opencl_agilekeychain_fmt.o opencl_zip_fmt.o \
 	opencl_encfs_fmt.o opencl_odf_fmt.o opencl_sxc_fmt.o opencl_gpg_fmt.o \
 	opencl_cryptsha256_fmt.o opencl_rawsha512-ng_fmt.o opencl_dmg_fmt.o \
 	opencl_DES_fmt.o opencl_DES_bs.o opencl_DES_bs_b.o opencl_strip_fmt.o \
@@ -198,7 +196,7 @@ OCL_OBJS = \
 	opencl_pbkdf2_hmac_sha256_fmt.o opencl_rakp_fmt.o \
 	opencl_krb5pa-md5_fmt.o opencl_keyring_fmt.o
 # broken:
-# opencl_7z_fmt.o opencl_zip_fmt.o
+# opencl_7z_fmt.o
 
 CUDA_OBJS = \
 	common-cuda.o cuda_common.o \
@@ -941,8 +939,10 @@ freebsd-x86-sse2:
 	$(LN) x86-sse.h arch.h
 	@echo "#define JOHN_BLD" '"'$@'"' > john_build_rule.h
 	$(MAKE) $(PROJ) \
+		CC=cc \
 		JOHN_OBJS="$(JOHN_OBJS) x86.o x86-sse.o sha1-mmx.o md4-mmx.o md5-mmx.o sse-intrinsics.o" \
-		ASFLAGS="$(ASFLAGS) -DBSD"
+		CFLAGS="$(CFLAGS) -msse2" \
+		ASFLAGS="$(ASFLAGS) -DBSD -msse2"
 	@echo "Failing after this point just means some helper tools did not build:"
 	$(MAKE) $(PROJ_PCAP)
 	@echo "All done"
@@ -1731,7 +1731,7 @@ win64-mingw-x86-64:
 	$(MAKE) $(PROJ_WIN32_MINGW) \
 		JOHN_OBJS="$(JOHN_OBJS) x86-64.o sse-intrinsics.o" \
 		CFLAGS="-c -static -Wall -Wdeclaration-after-statement -O2 -fomit-frame-pointer -I/usr/local/include $(OMPFLAGS) $(AMDAPP) $(JOHN_CFLAGS) -mpreferred-stack-boundary=4" \
-		LDFLAGS="-static -lssl -lcrypto -lwsock32 -lws2_32 -lgdi32 -lm -lpthread.dll -lz.dll $(OMPFLAGS)" \
+		LDFLAGS="-static -lssl -lcrypto -lwsock32 -lws2_32 -lgdi32 -lm -lpthread -lz $(OMPFLAGS)" \
 		ASFLAGS="$(ASFLAGS)" \
 		CPP=$(GCC) CC=$(GCC) LD=$(GCC) CXX=$(CXX)
 	@echo "Failing after this point just means some helper tools did not build:"
@@ -2310,7 +2310,7 @@ endif
 	$(LD) $(LDFLAGS) wpapcap2john.o memdbg.o -o ../run/wpapcap2john
 
 ../run/luks2john: luks2john.o
-	$(LD) luks2john.o -s -lcrypto -lssl -o ../run/luks2john
+	$(LD) ${LDFLAGS} luks2john.o -s -lcrypto -lssl -o ../run/luks2john
 
 ../run/keystore2john: ../run/john
 	$(RM) ../run/keystore2john

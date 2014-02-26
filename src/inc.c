@@ -46,7 +46,7 @@ static int get_progress(int *hundth_perc)
 
 	try = ((unsigned long long)status.cands.hi << 32) + status.cands.lo;
 
-	if (try > 1844674407370955LL) {
+	if (try > 1844674407370955ULL) {
 		*hundth_perc = percent = 99;
 	} else {
 		hundredXpercent = (int)((unsigned long long)(10000 * (try)) / (unsigned long long)cand);
@@ -616,8 +616,10 @@ void do_incremental_crack(struct db_main *db, char *mode)
 
 	for (pos = min_length; pos <= max_length; pos++)
 		cand += pow(real_count, pos);
-	if (options.node_count)
+	if (options.node_count) {
+		cand *= options.node_max - options.node_min + 1;
 		cand /= options.node_count;
+	}
 
 	if (!(db->format->params.flags & FMT_CASE) && is_mixedcase(allchars)) {
 		log_event("! Mixed-case charset, "

@@ -83,6 +83,7 @@
 #include "misc.h"
 #include "config.h"
 #include "md4.h"
+#include "john.h"
 #include "memdbg.h"
 
 #if !defined(uint16) && !defined(HAVE_UINT16_FROM_RPC_RPC_H)
@@ -502,6 +503,63 @@ inline unsigned int strlen8(const UTF8 *source)
 }
 
 /*
+ * Check if a string is valid UTF-8.  Returns true if the string is valid
+ * UTF-8 encoding, including pure 7-bit data or an empty string.
+ *
+ * The probability of a random string of bytes which is not pure ASCII being
+ * valid UTF-8 is 3.9% for a two-byte sequence, and decreases exponentially
+ * for longer sequences.  ISO/IEC 8859-1 is even less likely to be
+ * mis-recognized as UTF-8:  The only non-ASCII characters in it would have
+ * to be in sequences starting with either an accented letter or the
+ * multiplication symbol and ending with a symbol.
+ */
+int valid_utf8(const UTF8 *source)
+{
+	UTF8 a;
+	int length;
+	const UTF8 *srcptr;
+
+	while (*source) {
+		if (*source < 0x80) {
+			source++;
+			continue;
+		}
+
+		length = opt_trailingBytesUTF8[*source & 0x3f] + 1;
+		srcptr = source + length;
+
+		switch (length) {
+		default:
+			return 0;
+			/* Everything else falls through when valid */
+		case 4:
+			if ((a = (*--srcptr)) < 0x80 || a > 0xBF) return 0;
+		case 3:
+			if ((a = (*--srcptr)) < 0x80 || a > 0xBF) return 0;
+		case 2:
+			if ((a = (*--srcptr)) > 0xBF) return 0;
+
+			switch (*source) {
+				/* no fall-through in this inner switch */
+			case 0xE0: if (a < 0xA0) return 0; break;
+			case 0xED: if (a > 0x9F) return 0; break;
+			case 0xF0: if (a < 0x90) return 0; break;
+			case 0xF4: if (a > 0x8F) return 0; break;
+			default:   if (a < 0x80) return 0;
+			}
+
+		case 1:
+			if (*source >= 0x80 && *source < 0xC2) return 0;
+		}
+		if (*source > 0xF4)
+			return 0;
+
+		source += length;
+	}
+	return 1;
+}
+
+/*
  * Creates an MD4 Hash of the user's password in NT UNICODE.
  * This version honours the --encoding=utf8 flag and makes a couple
  * of formats utf8-aware with few further modifications.
@@ -789,8 +847,10 @@ int initUnicode(int type) {
 	unsigned char *cpU, *cpL;
 	char *encTemp;
 	char *pos;
+	static char *req_enc;
 
-	if (UnicodeType == type && UnicodeInited == options.encoding)
+	if (!options.node_count &&
+	    UnicodeType == type && UnicodeInited == req_enc)
 		return 0;
 
 	UnicodeType = type;
@@ -799,83 +859,92 @@ int initUnicode(int type) {
 	  options.iso8859_15 = options.koi8_r = options.cp437 =
 	  options.cp737 = options.cp850 = options.cp852 = options.cp858 = options.cp866 =
 	  options.cp1251 = options.cp1250 = options.cp1252 = options.cp1253 = 0;
-	// by 'default' we are setup in 7 bit ascii mode (for rules).
+
+	/*
+	 * By default we are setup in 7 bit ascii mode (for rules) and
+	 * ISO-8859-1 codepage (for Unicode conversions).  We can change
+	 * that in john.conf or with the --encoding option.
+	 */
+	if (!(req_enc = options.encoding))
+		req_enc = cfg_get_param(SECTION_OPTIONS, NULL,
+		                        "DefaultEncoding");
+
 	options.ascii = 1;
 	options.encodingStr = "";
-	if (options.encoding) {
+	if (req_enc) {
 		// Ok, check a 'few' valid things for utf8
 		options.ascii = 0;
-		if (!strcasecmp(options.encoding, "utf8")||!strcasecmp(options.encoding, "utf-8")) {
+		if (!strcasecmp(req_enc, "utf8")||!strcasecmp(req_enc, "utf-8")) {
 			options.utf8 = 1;
 			options.encodingStr = "UTF-8";
 			options.encodingDef = "UTF_8";
 		} else
-		if (!strcasecmp(options.encoding, "ansi")||!strcasecmp(options.encoding, "iso-8859-1")||!strcasecmp(options.encoding, "8859-1")||!strcasecmp(options.encoding, "iso8859-1")) {
+		if (!strcasecmp(req_enc, "ansi")||!strcasecmp(req_enc, "iso-8859-1")||!strcasecmp(req_enc, "8859-1")||!strcasecmp(req_enc, "iso8859-1")) {
 			options.iso8859_1 = 1;
 			options.encodingStr = "ISO-8859-1";
 			options.encodingDef = "ISO_8859_1";
 		} else
-		if (!strcasecmp(options.encoding, "iso-8859-2")||!strcasecmp(options.encoding, "8859-2")||!strcasecmp(options.encoding, "iso8859-2")) {
+		if (!strcasecmp(req_enc, "iso-8859-2")||!strcasecmp(req_enc, "8859-2")||!strcasecmp(req_enc, "iso8859-2")) {
 			options.iso8859_2 = 1;
 			options.encodingStr = "ISO-8859-2";
 			options.encodingDef = "ISO_8859_2";
 		} else
-		if (!strcasecmp(options.encoding, "iso-8859-7")||!strcasecmp(options.encoding, "8859-7")||!strcasecmp(options.encoding, "iso8859-7")) {
+		if (!strcasecmp(req_enc, "iso-8859-7")||!strcasecmp(req_enc, "8859-7")||!strcasecmp(req_enc, "iso8859-7")) {
 			options.iso8859_7 = 1;
 			options.encodingStr = "ISO-8859-7";
 			options.encodingDef = "ISO_8859_7";
 		} else
-		if (!strcasecmp(options.encoding, "iso-8859-15")||!strcasecmp(options.encoding, "8859-15")||!strcasecmp(options.encoding, "iso8859-15")) {
+		if (!strcasecmp(req_enc, "iso-8859-15")||!strcasecmp(req_enc, "8859-15")||!strcasecmp(req_enc, "iso8859-15")) {
 			options.iso8859_15 = 1;
 			options.encodingStr = "ISO-8859-15";
 			options.encodingDef = "ISO_8859_15";
 		} else
-		if (!strcasecmp(options.encoding, "koi8-r")||!strcasecmp(options.encoding, "koi8r")) {
+		if (!strcasecmp(req_enc, "koi8-r")||!strcasecmp(req_enc, "koi8r")) {
 			options.koi8_r = 1;
 			options.encodingStr = "KOI8-R";
 			options.encodingDef = "KOI8_R";
 		} else
-		if (!strcasecmp(options.encoding, "cp437")||!strcasecmp(options.encoding, "cp-437")) {
+		if (!strcasecmp(req_enc, "cp437")||!strcasecmp(req_enc, "cp-437")) {
 			options.cp437 = 1;
 			options.encodingDef = options.encodingStr = "CP437";
 		} else
-		if (!strcasecmp(options.encoding, "cp737")||!strcasecmp(options.encoding, "cp-737")) {
+		if (!strcasecmp(req_enc, "cp737")||!strcasecmp(req_enc, "cp-737")) {
 			options.cp737 = 1;
 			options.encodingDef = options.encodingStr = "CP737";
 		} else
-		if (!strcasecmp(options.encoding, "cp850")||!strcasecmp(options.encoding, "cp-850")) {
+		if (!strcasecmp(req_enc, "cp850")||!strcasecmp(req_enc, "cp-850")) {
 			options.cp850 = 1;
 			options.encodingDef = options.encodingStr = "CP850";
 		} else
-		if (!strcasecmp(options.encoding, "cp852")||!strcasecmp(options.encoding, "cp-852")) {
+		if (!strcasecmp(req_enc, "cp852")||!strcasecmp(req_enc, "cp-852")) {
 			options.cp852 = 1;
 			options.encodingDef = options.encodingStr = "CP852";
 		} else
-		if (!strcasecmp(options.encoding, "cp858")||!strcasecmp(options.encoding, "cp-858")) {
+		if (!strcasecmp(req_enc, "cp858")||!strcasecmp(req_enc, "cp-858")) {
 			options.cp858 = 1;
 			options.encodingDef = options.encodingStr = "CP858";
 		} else
-		if (!strcasecmp(options.encoding, "cp866")||!strcasecmp(options.encoding, "cp-866")) {
+		if (!strcasecmp(req_enc, "cp866")||!strcasecmp(req_enc, "cp-866")) {
 			options.cp866 = 1;
 			options.encodingDef = options.encodingStr = "CP866";
 		} else
-		if (!strcasecmp(options.encoding, "cp1250")||!strcasecmp(options.encoding, "cp-1250")) {
+		if (!strcasecmp(req_enc, "cp1250")||!strcasecmp(req_enc, "cp-1250")) {
 			options.cp1250 = 1;
 			options.encodingDef = options.encodingStr = "CP1250";
 		} else
-		if (!strcasecmp(options.encoding, "cp1251")||!strcasecmp(options.encoding, "cp-1251")) {
+		if (!strcasecmp(req_enc, "cp1251")||!strcasecmp(req_enc, "cp-1251")) {
 			options.cp1251 = 1;
 			options.encodingDef = options.encodingStr = "CP1251";
 		} else
-		if (!strcasecmp(options.encoding, "cp1252")||!strcasecmp(options.encoding, "cp-1252")) {
+		if (!strcasecmp(req_enc, "cp1252")||!strcasecmp(req_enc, "cp-1252")) {
 			options.cp1252 = 1;
 			options.encodingDef = options.encodingStr = "CP1252";
 		} else
-		if (!strcasecmp(options.encoding, "cp1253")||!strcasecmp(options.encoding, "cp-1253")) {
+		if (!strcasecmp(req_enc, "cp1253")||!strcasecmp(req_enc, "cp-1253")) {
 			options.cp1253 = 1;
 			options.encodingDef = options.encodingStr = "CP1253";
 		} else
-		if (!strcasecmp(options.encoding, "raw")||!strcasecmp(options.encoding, "ascii")||!strcasecmp(options.encoding, "default")) {
+		if (!strcasecmp(req_enc, "raw")||!strcasecmp(req_enc, "ascii")||!strcasecmp(req_enc, "default")) {
 			options.ascii = 1;
 			options.encodingStr = "raw";
 			options.encodingDef = "RAW";
@@ -887,8 +956,8 @@ int initUnicode(int type) {
 	}
 
 #ifndef NOT_JOHN
-	options.log_passwords = cfg_get_bool(SECTION_OPTIONS,
-	    NULL, "LogCrackedPasswords", 0);
+	options.log_passwords = options.secure ||
+		cfg_get_bool(SECTION_OPTIONS, NULL, "LogCrackedPasswords", 0);
 	options.report_utf8 = cfg_get_bool(SECTION_OPTIONS,
 	    NULL, "AlwaysReportUTF8", 0);
 #endif
@@ -1161,7 +1230,7 @@ int initUnicode(int type) {
 	for (pos = encTemp; *pos; pos++)
 		CP_isLetter[ARCH_INDEX(*pos)] = 1;
 
-	UnicodeInited = options.encoding;
+	UnicodeInited = req_enc;
 	return 0;
 }
 

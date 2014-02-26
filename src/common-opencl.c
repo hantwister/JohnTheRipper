@@ -13,6 +13,7 @@
  *    modifications, are permitted.
  */
 
+#define _BSD_SOURCE // setenv()
 #define NEED_OS_TIMER
 #include "os.h"
 
@@ -22,6 +23,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #include "options.h"
 #include "config.h"
@@ -366,6 +368,17 @@ void opencl_preinit(void)
 {
 	char * device_list[MAXGPUS], string[10];
 	int n = 0;
+	char *env;
+
+	// Prefer COMPUTE over DISPLAY and lacking both, assume :0
+	env = getenv("COMPUTE");
+	if (env && *env)
+		setenv("DISPLAY", env, 1);
+	else {
+		env = getenv("DISPLAY");
+		if (!env || !*env)
+			setenv("DISPLAY", ":0", 1);
+	}
 
 	if (!opencl_initialized) {
 		device_list[0] = NULL;
