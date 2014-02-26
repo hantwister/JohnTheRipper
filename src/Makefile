@@ -2310,7 +2310,7 @@ endif
 	$(LD) $(LDFLAGS) wpapcap2john.o memdbg.o -o ../run/wpapcap2john
 
 ../run/luks2john: luks2john.o
-	$(LD) ${LDFLAGS} luks2john.o -s -lcrypto -lssl -o ../run/luks2john
+	$(LD) ${LDFLAGS} luks2john.o -s -lcrypto -lssl memdbg.o -o ../run/luks2john
 
 ../run/keystore2john: ../run/john
 	$(RM) ../run/keystore2john
