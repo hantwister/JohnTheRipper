@@ -17,6 +17,7 @@
  */
 
 #define NEED_OS_FORK
+#define NEED_OS_TIMER
 #include "os.h"
 
 #include <stdio.h>
@@ -251,6 +252,7 @@ extern int zip2john(int argc, char **argv);
 extern int gpg2john(int argc, char **argv);
 
 int john_main_process = 1;
+char **john_argv;
 #if OS_FORK
 int john_child_count = 0;
 int *john_child_pids = NULL;
@@ -759,7 +761,7 @@ static void john_set_mpi(void)
 }
 #endif
 
-static void john_wait(void)
+void john_wait(void)
 {
 	int waiting_for = john_child_count;
 
@@ -898,7 +900,7 @@ static void john_load(void)
 		else
 		if (mem_saving_level) {
 			options.loader.flags &= ~DB_LOGIN;
-			options.loader.max_wordfile_memory = 1;
+			options.max_wordfile_memory = 1;
 		}
 
 		ldr_init_database(&database, &options.loader);
@@ -1084,6 +1086,9 @@ static void john_init(char *name, int argc, char **argv)
 		path_init(argv);
 	}
 
+	/* For recovery.c to be able to execv() the argv[0] we have now */
+	john_argv = argv;
+
 	status_init(NULL, 1);
 	if (argc < 2 ||
             (argc == 2 &&
@@ -1118,7 +1123,7 @@ static void john_init(char *name, int argc, char **argv)
 		}
 	}
 
-	if (cfg_get_bool(SECTION_OPTIONS, NULL, "SecureMode", 1))
+	if (cfg_get_bool(SECTION_OPTIONS, NULL, "SecureMode", 0))
 		options.secure = 1;
 
 	if (options.loader.activepot == NULL) {
@@ -1156,6 +1161,10 @@ static void john_init(char *name, int argc, char **argv)
 	sig_init();
 
 	john_load();
+
+	/* Start a resumed session by emitting a status line. */
+	if (rec_restored)
+		event_pending = event_status = 1;
 
 	if (options.encodingStr && options.encodingStr[0])
 		log_event("- %s input encoding enabled", options.encodingStr);
@@ -1278,12 +1287,10 @@ static void john_run(void)
 
 static void john_done(void)
 {
-	unsigned int time = status_get_time();
-
 	if ((options.flags & (FLG_CRACKING_CHK | FLG_STDOUT)) ==
 	    FLG_CRACKING_CHK) {
 		if (event_abort) {
-			log_event((time < timer_abort) ?
+			log_event((timer_abort >= 0) ?
 			          "Session aborted" :
 			          "Session stopped (max run-time reached)");
 			/* We have already printed to stderr from signals.c */
@@ -1468,12 +1475,25 @@ int main(int argc, char **argv)
 #endif
 	john_init(name, argc, argv);
 
-	/* --max-run-time and --progress-every disregards load time */
+	/*
+	 * Placed here to disregard load time.
+	 * The --reload-every=N option has a bonus provided only for experts
+	 * caring to read the source ;-)  Most users would misuse it anyway.
+	 */
+#if OS_TIMER
+	time = 0;
+#else
 	time = status_get_time();
+#endif
 	if (options.max_run_time)
 		timer_abort = time + options.max_run_time;
 	if (options.status_interval)
 		timer_status = time + options.status_interval;
+	if (options.reload_interval == 1337) {
+		options.reload_interval = 0;
+		options.reload_at_crack = 1;
+	} else if (options.reload_interval)
+		timer_reload = time + options.reload_interval;
 
 	john_run();
 	john_done();
