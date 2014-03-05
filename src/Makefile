@@ -163,6 +163,7 @@ JOHN_OBJS = \
 	dummy.o \
 	NT_fmt.o \
 	gost.o \
+	common-gpu.o \
 	batch.o bench.o charset.o common.o compiler.o config.o cracker.o \
 	crc32.o external.o formats.o getopt.o idle.o inc.o john.o list.o \
 	loader.o logger.o mask.o math.o memory.o misc.o options.o params.o \
@@ -192,7 +193,7 @@ OCL_OBJS = \
 	opencl_office2007_fmt.o opencl_office2010_fmt.o opencl_office2013_fmt.o \
 	opencl_ntlmv2_fmt.o opencl_rawsha256_fmt.o \
 	opencl_krb5pa-sha1_fmt.o opencl_rar_fmt.o opencl_odf_aes_fmt.o \
-	opencl_sha2_common.o opencl_blockchain_fmt.o \
+	opencl_sha2_common.o opencl_autotune.o opencl_blockchain_fmt.o \
 	opencl_pbkdf2_hmac_sha256_fmt.o opencl_rakp_fmt.o \
 	opencl_krb5pa-md5_fmt.o opencl_keyring_fmt.o
 # broken:

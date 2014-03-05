@@ -81,6 +81,9 @@ static int john_omp_threads_new;
 #ifdef HAVE_OPENCL
 #include "common-opencl.h"
 #endif
+#ifdef HAVE_CUDA
+#include "cuda_common.h"
+#endif
 #ifdef NO_JOHN_BLD
 #define JOHN_BLD "unk-build-type"
 #else
@@ -252,7 +255,6 @@ extern int zip2john(int argc, char **argv);
 extern int gpg2john(int argc, char **argv);
 
 int john_main_process = 1;
-char **john_argv;
 #if OS_FORK
 int john_child_count = 0;
 int *john_child_pids = NULL;
@@ -680,13 +682,13 @@ static void john_fork(void)
 			if (options.gpu_devices->count) {
 				// Pick device to use for this child
 				opencl_preinit();
-				ocl_gpu_id =
-				    ocl_device_list[i % opencl_get_devices()];
-				platform_id = get_platform_id(ocl_gpu_id);
+				gpu_id =
+				    gpu_device_list[i % opencl_get_devices()];
+				platform_id = get_platform_id(gpu_id);
 
 				// Hide any other devices from list
-				ocl_device_list[0] = ocl_gpu_id;
-				ocl_device_list[1] = -1;
+				gpu_device_list[0] = gpu_id;
+				gpu_device_list[1] = -1;
 
 				// Postponed format init in forked process
 				fmt_init(database.format);
@@ -715,11 +717,11 @@ static void john_fork(void)
 	if (options.gpu_devices->count) {
 		// Pick device to use for mother process
 		opencl_preinit();
-		ocl_gpu_id = ocl_device_list[0];
-		platform_id = get_platform_id(ocl_gpu_id);
+		gpu_id = gpu_device_list[0];
+		platform_id = get_platform_id(gpu_id);
 
 		// Hide any other devices from list
-		ocl_device_list[1] = -1;
+		gpu_device_list[1] = -1;
 
 		// Postponed format init in mother process
 		fmt_init(database.format);
@@ -761,7 +763,7 @@ static void john_set_mpi(void)
 }
 #endif
 
-void john_wait(void)
+static void john_wait(void)
 {
 	int waiting_for = john_child_count;
 
@@ -1086,9 +1088,6 @@ static void john_init(char *name, int argc, char **argv)
 		path_init(argv);
 	}
 
-	/* For recovery.c to be able to execv() the argv[0] we have now */
-	john_argv = argv;
-
 	status_init(NULL, 1);
 	if (argc < 2 ||
             (argc == 2 &&
@@ -1155,7 +1154,7 @@ static void john_init(char *name, int argc, char **argv)
 	if (cfg_get_bool(SECTION_OPTIONS, SUBSECTION_OPENCL, "ForceScalar", 0))
 		options.flags |= FLG_SCALAR;
 
-	ocl_gpu_id = -1;
+	gpu_id = -1;
 #endif
 
 	sig_init();
@@ -1312,6 +1311,10 @@ static void john_done(void)
 #ifdef HAVE_OPENCL
 	if (!(options.flags & FLG_FORK) || john_main_process)
 		opencl_done();
+#endif
+#ifdef HAVE_CUDA
+	if (!(options.flags & FLG_FORK) || john_main_process)
+		cuda_done();
 #endif
 
 	path_done();
