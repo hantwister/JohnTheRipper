@@ -28,7 +28,6 @@ SORT = sort
 STRIP = strip
 
 ## Uncomment the line below for MPI (can be used together with OMP as well)
-## For experimental MPI_Abort support, append -DJOHN_MPI_ABORT too.
 #CC = mpicc -DHAVE_MPI
 
 OMPFLAGS =
@@ -2317,8 +2316,8 @@ endif
 ../run/SIPdump: SIPdump.o
 	$(LD) SIPdump.o memdbg.o $(LDFLAGS) -lpcap -o ../run/SIPdump
 
-../run/vncpcap2john:
-	$(CXX) -Wall vncpcap2john.cpp -lpcap -o ../run/vncpcap2john
+../run/vncpcap2john: vncpcap2john.c
+	$(CC) -Wall vncpcap2john.c -lpcap -o ../run/vncpcap2john
 
 ../run/uaf2john: uaf2john.o uaf_encode_plug.o
 	$(LD) $(LDFLAGS) uaf2john.o uaf_encode_plug.o memdbg.o -o ../run/uaf2john

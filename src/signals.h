@@ -36,15 +36,17 @@ extern volatile int event_reload;	/* Reload of pot file requested */
 extern volatile int event_save;		/* Save the crash recovery file */
 extern volatile int event_status;	/* Status display requested */
 extern volatile int event_ticksafety;	/* System time in ticks may overflow */
+#ifdef HAVE_MPI
+extern volatile int event_mpiprobe;	/* MPI probe for messages requested */
+#endif
+extern volatile int event_poll_files;	/* Every 3 s, poll pause/abort files */
+extern volatile int aborted_by_timer;	/* Session was aborted by timer */
 
-/* --max-run-time timer, zero if reached */
+/* --max-run-time timer */
 extern volatile int timer_abort;
 
 /* --progress-every timer */
 extern volatile int timer_status;
-
-/* --reload-every timer */
-extern volatile int timer_reload;
 
 #if !OS_TIMER
 /*

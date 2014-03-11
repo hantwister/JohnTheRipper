@@ -15,8 +15,13 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+#include <time.h>
+#if HAVE_SYS_TIMES_H
+#include <sys/times.h>
+#endif
 #include <fcntl.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "arch.h"
 #include "misc.h"
@@ -43,6 +48,10 @@
 
 #ifdef index
 #undef index
+#endif
+
+#ifdef DEBUG
+static clock_t salt_time = 0;
 #endif
 
 static struct db_main *crk_db;
@@ -162,6 +171,14 @@ static void crk_remove_salt(struct db_salt *salt)
 	while (*current != salt)
 		current = &(*current)->next;
 	*current = salt->next;
+
+	/* If we kept the salt_hash table, update it */
+	if (crk_db->salt_hash) {
+		int hash = crk_methods.salt_hash(salt->salt);
+
+		if (crk_db->salt_hash[hash] == salt)
+			crk_db->salt_hash[hash] = salt->next;
+	}
 }
 
 /*
@@ -338,35 +355,74 @@ static int crk_remove_pot_entry(char *ciphertext, char *plain)
 	struct db_salt *salt;
 	struct db_password *pw;
 	char *pot_salt;
+	char *binary = crk_methods.binary(ciphertext);
+#ifdef DEBUG
+	struct tms buffer;
+	clock_t start = times(&buffer), end;
+#endif
 
 	pot_salt = crk_methods.salt(ciphertext);
 
-	salt = crk_db->salts;
+	/* Do we still have a hash table for salts? */
+	if (crk_db->salt_hash) {
+		salt = crk_db->salt_hash[crk_methods.salt_hash(pot_salt)];
+		if (!salt)
+			return 0;
+	} else
+		salt = crk_db->salts;
+
 	do {
-		if (!memcmp(pot_salt, salt->salt,
-		            crk_params.salt_size)) {
-			pw = salt->list;
-			do {
-				char *source;
-
-				if (!pw->binary)
-					continue;
-
-				source = crk_methods.source(pw->source,
-				                            pw->binary);
-
-				if (!strcmp(source, ciphertext)) {
-					if (crk_process_guess(salt, pw, 0,
-					                      plain))
-						return 1;
-					else
-					if (!(crk_params.flags & FMT_NOT_EXACT))
-						break;
-				}
-			} while ((pw = pw->next));
+		if (!memcmp(pot_salt, salt->salt, crk_params.salt_size))
 			break;
-		}
 	} while ((salt = salt->next));
+
+#ifdef DEBUG
+	end = times(&buffer);
+	salt_time += (end - start);
+#endif
+	if (!salt)
+		return 0;
+
+	if (!salt->bitmap) {
+		/* How come we need this "if", is it a bug? Well this is "best
+		   effort" anyway - worst case is we miss to remove some
+		   entries during pot sync */
+		if ((pw = salt->list))
+		do {
+			char *source;
+
+			if (!pw->binary)
+				continue;
+
+			source = crk_methods.source(pw->source, pw->binary);
+
+			if (!strcmp(source, ciphertext))
+				return crk_process_guess(salt, pw, 0, plain);
+
+		} while ((pw = pw->next));
+	}
+	else {
+		int hash;
+
+		hash = crk_methods.binary_hash[salt->hash_size](binary);
+		if (!(salt->bitmap[hash / (sizeof(*salt->bitmap) * 8)] &
+		      (1U << (hash % (sizeof(*salt->bitmap) * 8)))))
+			return 0;
+
+		/* We test here too for safety although no problem seen */
+		if ((pw = salt->hash[hash >> PASSWORD_HASH_SHR]))
+		do {
+			char *source;
+
+			if (!pw->binary)
+				continue;
+
+			source = crk_methods.source(pw->source, pw->binary);
+
+			if (!strcmp(source, ciphertext))
+				return crk_process_guess(salt, pw, 0, plain);
+		} while ((pw = pw->next_hash));
+	}
 
 	return 0;
 }
@@ -377,8 +433,16 @@ int crk_reload_pot(void)
 	int pot_fd;
 	FILE *pot_file;
 	int total = crk_db->password_count, others;
+#ifdef DEBUG
+	struct tms buffer;
+	clock_t start = times(&buffer), end;
 
+	salt_time = 0;
+#endif
 	event_reload = 0;
+
+	if (crk_params.flags & FMT_NOT_EXACT)
+		return 0;
 
 	if ((pot_fd =
 	     open(path_expand(options.loader.activepot), O_RDONLY)) == -1) {
@@ -387,9 +451,10 @@ int crk_reload_pot(void)
 		return 0;
 	}
 
+#if OS_FLOCK
 	if (flock(pot_fd, LOCK_SH) == -1)
 		pexit("flock: %s", options.loader.activepot);
-
+#endif
 	if (!(pot_file = fdopen(pot_fd, "rb")))
 		pexit("fdopen: %s", options.loader.activepot);
 
@@ -400,10 +465,9 @@ int crk_reload_pot(void)
 	}
 
 	while (fgetl(line, sizeof(line), pot_file)) {
-		char ciphertext[LINE_BUFFER_SIZE];
+		char *ciphertext = line;
 		char *plain, *p;
 
-		strnzcpy(ciphertext, line, sizeof(ciphertext));
 		if (!(p = strchr(ciphertext, options.loader.field_sep_char)))
 			continue;
 		*p = 0;
@@ -415,7 +479,12 @@ int crk_reload_pot(void)
 	}
 
 	crk_pot_pos = ftell(pot_file);
-	fclose(pot_file);
+#if OS_FLOCK
+	if (flock(pot_fd, LOCK_UN))
+		perror("flock(LOCK_UN)");
+#endif
+	if (fclose(pot_file))
+		pexit("fclose");
 
 	others = total - crk_db->password_count;
 
@@ -423,7 +492,7 @@ int crk_reload_pot(void)
 		log_event("+ pot sync removed %d hashes; %s",
 		          others, crk_loaded_counts());
 
-	if (!crk_db->salts || (others && options.verbosity > 3)) {
+	if (others && options.verbosity > 3) {
 		if (options.node_count)
 			fprintf(stderr, "%u: %s\n",
 			        options.node_min, crk_loaded_counts());
@@ -431,12 +500,95 @@ int crk_reload_pot(void)
 			fprintf(stderr, "%s\n", crk_loaded_counts());
 	}
 
+#ifdef DEBUG
+	end = times(&buffer);
+	fprintf(stderr, "%d: potsync removed %d hashes in %lu ms (%lu ms finding salts); %s\n", options.node_min, others, 1000UL*(end - start)/CLK_TCK, 1000UL * salt_time / CLK_TCK, crk_loaded_counts());
+#endif
+
 	return (!crk_db->salts);
+}
+
+#ifdef HAVE_MPI
+static void crk_mpi_probe(void)
+{
+	static MPI_Status s;
+	int flag;
+
+	MPI_Iprobe(MPI_ANY_SOURCE, JOHN_MPI_RELOAD, MPI_COMM_WORLD, &flag, &s);
+	if (flag) {
+		static MPI_Request r;
+		char buf[16];
+
+		event_reload = 1;
+		MPI_Irecv(buf, 1, MPI_CHAR, MPI_ANY_SOURCE,
+		          JOHN_MPI_RELOAD, MPI_COMM_WORLD, &r);
+	}
+}
+#endif
+
+static void crk_poll_files(void)
+{
+	struct stat trigger_stat;
+
+	if (options.abort_file &&
+	    stat(path_expand(options.abort_file), &trigger_stat) == 0) {
+		if (!event_abort && john_main_process)
+			fprintf(stderr, "Abort file seen\n");
+		log_event("Abort file seen");
+		event_pending = event_abort = 1;
+	}
+	else if (options.pause_file &&
+	         stat(path_expand(options.pause_file), &trigger_stat) == 0) {
+#if !HAVE_SYS_TIMES_H
+		time_t end, start = clock();
+#else
+		struct tms buf;
+		time_t end, start = times(&buf);
+#endif
+
+		status_print();
+		if (john_main_process)
+			fprintf(stderr, "Pause file seen, going to sleep "
+			        "(session saved)\n");
+		log_event("Pause file seen, going to sleep");
+
+		/* Better save stuff before going to sleep */
+		rec_save();
+
+		do {
+			int s = 3;
+
+			do {
+				s = sleep(s);
+			} while (s);
+
+		} while (stat(path_expand(options.pause_file),
+		              &trigger_stat) == 0);
+
+		if (john_main_process)
+			fprintf(stderr, "Pause file removed, continuing\n");
+		log_event("Pause file removed, continuing");
+
+		/* Disregard pause time for stats */
+#if !HAVE_SYS_TIMES_H
+		end = clock();
+#else
+		end = times(&buf);
+#endif
+		status.start_time -= (start - end);
+	}
 }
 
 static int crk_process_event(void)
 {
 	event_pending = 0;
+
+#ifdef HAVE_MPI
+	if (event_mpiprobe) {
+		event_mpiprobe = 0;
+		crk_mpi_probe();
+	}
+#endif
 
 	if (event_save) {
 		event_save = 0;
@@ -451,6 +603,11 @@ static int crk_process_event(void)
 	if (event_ticksafety) {
 		event_ticksafety = 0;
 		status_ticks_overflow_safety();
+	}
+
+	if (event_poll_files) {
+		event_poll_files = 0;
+		crk_poll_files();
 	}
 
 	return event_abort;

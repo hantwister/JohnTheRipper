@@ -33,6 +33,7 @@
 #include <sys/stat.h>
 #if OS_FORK
 #include <sys/wait.h>
+#include <signal.h>
 #endif
 
 #include "params.h"
@@ -767,6 +768,9 @@ static void john_wait(void)
 {
 	int waiting_for = john_child_count;
 
+	if (!database.password_count && !options.reload_at_crack)
+		raise(SIGUSR2);
+
 	log_event("Waiting for %d child%s to terminate",
 	    waiting_for, waiting_for == 1 ? "" : "ren");
 	fprintf(stderr, "Waiting for %d child%s to terminate\n",
@@ -802,12 +806,30 @@ static void john_wait(void)
 #ifdef HAVE_MPI
 static void john_mpi_wait(void)
 {
-	if (!database.password_count)
-		fprintf(stderr, "%d: All hashes cracked! Abort remaining"
-		        " nodes manually!\n", mpi_id + 1);
+	if (!database.password_count && !options.reload_at_crack) {
+		int i;
 
-	if (john_main_process)
+		for (i = 0; i < mpi_p; i++) {
+			if (i == mpi_id)
+				continue;
+			if (mpi_req[i] == NULL)
+				mpi_req[i] = mem_alloc_tiny(sizeof(MPI_Request),
+				                            MEM_ALIGN_WORD);
+			else
+				if (*mpi_req[i] != MPI_REQUEST_NULL)
+					continue;
+			MPI_Isend("r", 1, MPI_CHAR, i, JOHN_MPI_RELOAD,
+			          MPI_COMM_WORLD, mpi_req[i]);
+		}
+	}
+
+	if (john_main_process) {
+		log_event("Waiting for other node%s to terminate",
+		          mpi_p > 2 ? "s" : "");
+		fprintf(stderr, "Waiting for other node%s to terminate\n",
+		        mpi_p > 2 ? "s" : "");
 		mpi_teardown();
+	}
 
 /* Close and possibly remove our .rec file now */
 	rec_done(!event_abort ? -1 : -2);
@@ -829,6 +851,47 @@ static char *john_loaded_counts(void)
 		database.salt_count);
 
 	return s_loaded_counts;
+}
+
+static void john_load_conf(void)
+{
+	if (options.loader.activepot == NULL) {
+		if (options.secure)
+			options.loader.activepot = str_alloc_copy(SEC_POT_NAME);
+		else
+			options.loader.activepot = str_alloc_copy(POT_NAME);
+	}
+
+	options.secure = cfg_get_bool(SECTION_OPTIONS, NULL, "SecureMode", 0);
+	options.reload_at_crack =
+		cfg_get_bool(SECTION_OPTIONS, NULL, "ReloadAtCrack", 1);
+	options.reload_at_save =
+		cfg_get_bool(SECTION_OPTIONS, NULL, "ReloadAtSave", 1);
+	options.abort_file = cfg_get_param(SECTION_OPTIONS, NULL, "AbortFile");
+	options.pause_file = cfg_get_param(SECTION_OPTIONS, NULL, "PauseFile");
+
+	/* This is --crack-status. We toggle here, so if it's enabled in
+	   john.conf, we can disable it using the command line option */
+	if (cfg_get_bool(SECTION_OPTIONS, NULL, "CrackStatus", 0))
+		options.flags ^= FLG_CRKSTAT;
+
+	initUnicode(UNICODE_UNICODE); /* Init the unicode system */
+
+#ifdef HAVE_OPENCL
+	if (cfg_get_bool(SECTION_OPTIONS, SUBSECTION_OPENCL, "ForceScalar", 0))
+		options.flags |= FLG_SCALAR;
+#endif
+
+	if (database.password_count) {
+		if (database.format->params.flags & FMT_UNICODE)
+			options.store_utf8 =
+				cfg_get_bool(SECTION_OPTIONS,
+				             NULL, "UnicodeStoreUTF8", 0);
+		else
+			options.store_utf8 =
+				cfg_get_bool(SECTION_OPTIONS,
+				             NULL, "CPstoreUTF8", 0);
+	}
 }
 
 static void john_load(void)
@@ -1033,10 +1096,10 @@ static void john_load(void)
 		if (mpi_p > 1)
 			john_set_mpi();
 #endif
-		/* Re-init the unicode system. After resuming a forked or
+		/* Re-parse stuff from john.conf. After resuming a forked or
 		   MPI session, this is needed because the whole options
 		   struct is reset. */
-		initUnicode(UNICODE_UNICODE);
+		john_load_conf();
 	}
 }
 
@@ -1122,26 +1185,16 @@ static void john_init(char *name, int argc, char **argv)
 		}
 	}
 
-	if (cfg_get_bool(SECTION_OPTIONS, NULL, "SecureMode", 0))
-		options.secure = 1;
+#ifdef HAVE_OPENCL
+	gpu_id = -1;
+#endif
 
-	if (options.loader.activepot == NULL) {
-		if (options.secure)
-			options.loader.activepot = str_alloc_copy(SEC_POT_NAME);
-		else
-			options.loader.activepot = str_alloc_copy(POT_NAME);
-	}
-
-	/* This is --crack-status. We toggle here, so if it's enabled in
-	   john.conf, we can disable it using the command line option */
-	if (cfg_get_bool(SECTION_OPTIONS, NULL, "CrackStatus", 0))
-		options.flags ^= FLG_CRKSTAT;
+	/* Fetch configuration options from john.conf */
+	john_load_conf();
 
 #ifdef _OPENMP
 	john_omp_maybe_adjust_or_fallback(argv);
 #endif
-
-	initUnicode(UNICODE_UNICODE); /* Init the unicode system */
 
 	john_register_all(); /* maybe restricted to one format by options */
 
@@ -1149,13 +1202,6 @@ static void john_init(char *name, int argc, char **argv)
 	if ((options.subformat && !strcasecmp(options.subformat, "list")) ||
 	    options.listconf)
 		listconf_parse_late();
-
-#ifdef HAVE_OPENCL
-	if (cfg_get_bool(SECTION_OPTIONS, SUBSECTION_OPENCL, "ForceScalar", 0))
-		options.flags |= FLG_SCALAR;
-
-	gpu_id = -1;
-#endif
 
 	sig_init();
 
@@ -1171,6 +1217,8 @@ static void john_init(char *name, int argc, char **argv)
 
 static void john_run(void)
 {
+	struct stat trigger_stat;
+
 	if (options.flags & FLG_TEST_CHK)
 		exit_status = benchmark_all() ? 1 : 0;
 	else
@@ -1179,6 +1227,14 @@ static void john_run(void)
 	else
 	if (options.flags & FLG_CRACKING_CHK) {
 		int remaining = database.password_count;
+
+		if (options.abort_file &&
+		    stat(path_expand(options.abort_file), &trigger_stat) == 0) {
+			if (john_main_process)
+			fprintf(stderr, "Abort file %s present, "
+			        "refusing to start\n", options.abort_file);
+			error();
+		}
 
 		if (!(options.flags & FLG_STDOUT)) {
 			char *where = fmt_self_test(database.format);
@@ -1289,9 +1345,9 @@ static void john_done(void)
 	if ((options.flags & (FLG_CRACKING_CHK | FLG_STDOUT)) ==
 	    FLG_CRACKING_CHK) {
 		if (event_abort) {
-			log_event((timer_abort >= 0) ?
-			          "Session aborted" :
-			          "Session stopped (max run-time reached)");
+			log_event((aborted_by_timer) ?
+			          "Session stopped (max run-time reached)" :
+			          "Session aborted");
 			/* We have already printed to stderr from signals.c */
 		} else if (children_ok) {
 			log_event("Session completed");
@@ -1478,11 +1534,7 @@ int main(int argc, char **argv)
 #endif
 	john_init(name, argc, argv);
 
-	/*
-	 * Placed here to disregard load time.
-	 * The --reload-every=N option has a bonus provided only for experts
-	 * caring to read the source ;-)  Most users would misuse it anyway.
-	 */
+	/* Placed here to disregard load time. */
 #if OS_TIMER
 	time = 0;
 #else
@@ -1492,11 +1544,6 @@ int main(int argc, char **argv)
 		timer_abort = time + options.max_run_time;
 	if (options.status_interval)
 		timer_status = time + options.status_interval;
-	if (options.reload_interval == 1337) {
-		options.reload_interval = 0;
-		options.reload_at_crack = 1;
-	} else if (options.reload_interval)
-		timer_reload = time + options.reload_interval;
 
 	john_run();
 	john_done();

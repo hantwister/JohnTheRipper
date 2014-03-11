@@ -11,6 +11,7 @@
  */
 
 #include <stdio.h>
+#define NEED_OS_FORK
 #include "os.h"
 #if HAVE_UNISTD_H
 #include <unistd.h>
@@ -28,6 +29,7 @@
 #include "params.h"
 #define INCLUDED_FROM_MISC_C
 #include "misc.h"
+#include "options.h"
 
 #ifdef HAVE_MPI
 #include "john-mpi.h"
@@ -39,10 +41,6 @@ void error(void)
 #ifndef _JOHN_MISC_NO_LOG
 	log_event("Terminating on error");
 	log_done();
-#if defined(HAVE_MPI) && defined(JOHN_MPI_ABORT)
-	if (mpi_p > 1)
-		MPI_Abort(MPI_COMM_WORLD,1);
-#endif
 #endif
 
 	exit(1);
@@ -53,8 +51,14 @@ void pexit(char *format, ...)
 	va_list args;
 
 #if defined(HAVE_MPI) && !defined(_JOHN_MISC_NO_LOG)
-	fprintf(stderr, "Node %u@%s: ", mpi_id + 1, mpi_name);
+	if (mpi_p > 1)
+		fprintf(stderr, "%u@%s: ", mpi_id + 1, mpi_name);
+	else
+#elif OS_FORK && !defined(_JOHN_MISC_NO_LOG)
+	if (options.fork)
+		fprintf(stderr, "%u: ", options.node_min);
 #endif
+
 	va_start(args, format);
 	vfprintf(stderr, format, args);
 	va_end(args);

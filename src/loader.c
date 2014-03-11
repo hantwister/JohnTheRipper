@@ -35,6 +35,7 @@
 #include "dynamic.h"
 #include "fake_salts.h"
 #include "john.h"
+#include "cracker.h"
 #include "memdbg.h"
 
 #ifdef HAVE_CRYPT
@@ -86,6 +87,8 @@ static void read_file(struct db_main *db, char *name, int flags,
 		process_line(db, line);
 		check_abort(0);
 	}
+	if (name == options.loader.activepot)
+		crk_pot_pos = (long int)ftell(file);
 
 	if (ferror(file)) pexit("fgets");
 
@@ -870,10 +873,24 @@ static void ldr_sort_salts(struct db_main *db)
 	/* now we sort this array of pointers. */
 	qsort(ar, db->salt_count, sizeof(ar[0]), ldr_salt_cmp);
 
+	/* Clear salt hash table, if we still have one */
+	if (db->salt_hash) {
+		memset(db->salt_hash, 0,
+		       SALT_HASH_SIZE * sizeof(struct db_salt *));
+	}
+
 	/* finally, we re-build the linked list of salts */
 	db->salts = ar[0].p;
 	s = db->salts;
 	for (i = 1; i < db->salt_count; ++i) {
+		/* Rebuild salt hash table, if we still had one */
+		if (db->salt_hash) {
+			int hash;
+
+			hash = db->format->methods.salt_hash(s->salt);
+			if (!db->salt_hash[hash])
+				db->salt_hash[hash] = s;
+		}
 		s->next = ar[i].p;
 		s = s->next;
 	}
@@ -1075,7 +1092,9 @@ void ldr_fix_database(struct db_main *db)
 {
 	ldr_init_salts(db);
 	MEM_FREE(db->password_hash);
-	MEM_FREE(db->salt_hash);
+	if (db->format->methods.salt_hash == fmt_default_salt_hash ||
+	    mem_saving_level >= 2) /* Otherwise kept for faster pot sync */
+		MEM_FREE(db->salt_hash);
 
 	ldr_filter_salts(db);
 	ldr_remove_marked(db);
