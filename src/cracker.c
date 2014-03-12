@@ -2,7 +2,7 @@
  * This file is part of John the Ripper password cracker,
  * Copyright (c) 1996-2003,2006,2010-2013 by Solar Designer
  *
- * ...with a change in the jumbo patch, by JimF
+ * ...with heavy changes in the jumbo patch, by magnum & JimF
  */
 
 #define NEED_OS_TIMER
@@ -396,9 +396,13 @@ static int crk_remove_pot_entry(char *ciphertext, char *plain)
 
 			source = crk_methods.source(pw->source, pw->binary);
 
-			if (!strcmp(source, ciphertext))
-				return crk_process_guess(salt, pw, 0, plain);
+			if (!strcmp(source, ciphertext)) {
+				if (crk_process_guess(salt, pw, 0, plain))
+					return 1;
 
+				if (!(crk_db->options->flags & DB_WORDS))
+					break;
+			}
 		} while ((pw = pw->next));
 	}
 	else {
@@ -419,8 +423,13 @@ static int crk_remove_pot_entry(char *ciphertext, char *plain)
 
 			source = crk_methods.source(pw->source, pw->binary);
 
-			if (!strcmp(source, ciphertext))
-				return crk_process_guess(salt, pw, 0, plain);
+			if (!strcmp(source, ciphertext)) {
+				if (crk_process_guess(salt, pw, 0, plain))
+					return 1;
+
+				if (!(crk_db->options->flags & DB_WORDS))
+					break;
+			}
 		} while ((pw = pw->next_hash));
 	}
 
@@ -464,6 +473,8 @@ int crk_reload_pot(void)
 		crk_pot_pos = 0;
 	}
 
+	ldr_in_pot = 1; /* Mutes some warnings from valid() et al */
+
 	while (fgetl(line, sizeof(line), pot_file)) {
 		char *ciphertext = line;
 		char *plain, *p;
@@ -478,6 +489,8 @@ int crk_reload_pot(void)
 			break;
 	}
 
+	ldr_in_pot = 0;
+
 	crk_pot_pos = ftell(pot_file);
 #if OS_FLOCK
 	if (flock(pot_fd, LOCK_UN))
@@ -488,7 +501,7 @@ int crk_reload_pot(void)
 
 	others = total - crk_db->password_count;
 
-	if (!crk_db->password_count || others)
+	if (others)
 		log_event("+ pot sync removed %d hashes; %s",
 		          others, crk_loaded_counts());
 
