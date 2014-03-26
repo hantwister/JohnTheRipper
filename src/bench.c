@@ -405,8 +405,8 @@ int benchmark_all(void)
 		if (!format->params.tests && format != fmt_list)
 			continue;
 
-/* Just test the encoding-aware formats if --encoding */
-		if ((!options.ascii && !options.iso8859_1) &&
+/* Just test the encoding-aware formats if --encoding was used explicitly */
+		if (options.encoding && !options.ascii && !options.iso8859_1 &&
 		    !(format->params.flags & FMT_UTF8)) {
 			if (options.format == NULL ||
 			    strcasecmp(format->params.label, options.format))
@@ -415,11 +415,6 @@ int benchmark_all(void)
 				if (format->params.flags & FMT_UNICODE) {
 					if (john_main_process)
 						printf("The %s format does not yet support encodings other than ISO-8859-1\n\n", format->params.label);
-					continue;
-				}
-				else {
-					if (john_main_process)
-						printf("The %s format does not use internal charset conversion (--encoding option).\n\n", format->params.label);
 					continue;
 				}
 			}
@@ -443,7 +438,8 @@ int benchmark_all(void)
 		    format->params.benchmark_comment,
 		    format->params.algorithm_name,
 #ifndef _JOHN_BENCH_TMP
-			(options.utf8) ? " in UTF-8 mode" : "");
+			(options.utf8 && format->params.flags & FMT_UNICODE) ?
+		        " in UTF-8 mode" : "");
 #else
 			"");
 #endif

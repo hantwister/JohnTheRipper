@@ -200,6 +200,7 @@ extern struct fmt_main fmt_opencl_blockchain;
 extern struct fmt_main fmt_opencl_keyring;
 //extern struct fmt_main fmt_opencl_sevenzip;
 extern struct fmt_main fmt_opencl_pbkdf2_hmac_sha256;
+extern struct fmt_main fmt_opencl_pbkdf2_hmac_sha512;
 extern struct fmt_main fmt_opencl_rakp;
 #endif
 #ifdef HAVE_CUDA
@@ -435,6 +436,7 @@ static void john_register_all(void)
 	john_register_one(&fmt_opencl_xsha512_ng);
 	john_register_one(&fmt_opencl_zip);
 	john_register_one(&fmt_opencl_pbkdf2_hmac_sha256);
+	john_register_one(&fmt_opencl_pbkdf2_hmac_sha512);
 	john_register_one(&fmt_opencl_rakp);
 #endif
 
@@ -945,6 +947,7 @@ static void john_load(void)
 		memset(&dummy_format, 0, sizeof(dummy_format));
 		dummy_format.params.plaintext_length = options.length;
 		dummy_format.params.flags = FMT_CASE | FMT_8_BIT;
+		dummy_format.params.label = "stdout";
 		dummy_format.methods.clear_keys = &fmt_default_clear_keys;
 	}
 

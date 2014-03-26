@@ -97,11 +97,21 @@ static DYNAMIC_primitive_funcp _Funcs_1[] =
 #include <time.h>
 
 #include "arch.h"
+
+/* OMP code is b0rken - it assumes all PARA's are the same */
+#if defined(_OPENMP) && defined(MMX_COEF) &&	  \
+	(SHA1_SSE_PARA != MD5_SSE_PARA || \
+	SHA1_SSE_PARA != MD4_SSE_PARA || \
+	 MD4_SSE_PARA != MD5_SSE_PARA)
+#undef _OPENMP
+#define WAS_OPENMP
+#endif
+
 #if defined (MMX_COEF) && MMX_COEF==2 && defined (_OPENMP)
 // NO thread support for MMX.  Only OpenSSL (CTX model), or SSE intrinsics have
 // thread support.  The older md5_mmx.S/sha1_mmx.S files are NOT thread safe.
 #undef _OPENMP
-#define WAS_MMX_OPENMP
+#define WAS_OPENMP
 #endif
 #include "misc.h"
 #include "common.h"
@@ -1583,7 +1593,7 @@ static void crypt_all(int count)
 		inc = ((inc+OMP_INC-1)/OMP_INC)*OMP_INC;
 	else
 		// NOTE, we will likely want to know to use OMP_MD5_INC, OMP_MD4_INC
-		// but for now, this works.
+		// but for now, this works (not! it fails on most builds).
 		inc = ((inc+OMP_MD5_INC-1)/OMP_MD5_INC)*OMP_MD5_INC;
 #endif
 #pragma omp parallel for shared(curdat, inc, m_count)
@@ -2554,7 +2564,10 @@ static struct fmt_main fmt_Dynamic =
 		MIN_KEYS_PER_CRYPT_X86,
 		MAX_KEYS_PER_CRYPT_X86,
 #endif
-		FMT_CASE | FMT_8_BIT | FMT_OMP,
+#ifdef _OPENMP
+		FMT_OMP |
+#endif
+		FMT_CASE | FMT_8_BIT,
 		dynamic_tests
 	}, {
 		init,
