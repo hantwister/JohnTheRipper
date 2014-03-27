@@ -77,6 +77,11 @@ volatile int aborted_by_timer = 0;
 
 #if !OS_TIMER
 
+#include <time.h>
+#if !defined (__MINGW32__) && !defined (_MSC_VER)
+#include <sys/times.h>
+#endif
+
 static clock_t timer_emu_interval = 0;
 static unsigned int timer_emu_count = 0, timer_emu_max = 0;
 
