@@ -76,7 +76,7 @@ static int john_omp_threads_new;
 #include "john-mpi.h"
 #endif
 #if HAVE_REXGEN
-#include "regex.h"
+#include "rexgen.h"
 #endif /* HAVE_REXGEN */
 
 #include <openssl/opensslv.h>
@@ -881,6 +881,22 @@ static void john_load_conf(void)
 			options.activesinglerules =
 				str_alloc_copy(SUBSECTION_SINGLE);
 
+	if ((options.flags & FLG_WORDLIST_CHK) &&
+	    !(options.flags & FLG_RULES)) {
+		if ((options.activewordlistrules =
+		     cfg_get_param(SECTION_OPTIONS, NULL,
+		                   "WordlistRules")))
+			options.flags |= FLG_RULES;
+	}
+
+	if ((options.flags & FLG_LOOPBACK_CHK) &&
+	    !(options.flags & FLG_RULES)) {
+		if ((options.activewordlistrules =
+		     cfg_get_param(SECTION_OPTIONS, NULL,
+		                   "LoopbackRules")))
+			options.flags |= FLG_RULES;
+	}
+
 	options.secure = cfg_get_bool(SECTION_OPTIONS, NULL, "SecureMode", 0);
 	options.reload_at_crack =
 		cfg_get_bool(SECTION_OPTIONS, NULL, "ReloadAtCrack", 1);
@@ -1306,11 +1322,11 @@ static void john_run(void)
 		else
 		if (options.flags & FLG_WORDLIST_CHK)
 			do_wordlist_crack(&database, options.wordlist,
-				(options.flags & FLG_RULES) != 0);
+				(options.flags & FLG_RULES) != 0, options.rexgen);
 #if HAVE_REXGEN
 		else
 		if (options.flags & FLG_REGEX_CHK)
-			do_regex_crack(&database, options.regex);
+			do_rexgen_crack(&database, options.rexgen);
 #endif /* HAVE_REXGEN */
 		else
 		if (options.flags & FLG_INC_CHK)
