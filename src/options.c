@@ -55,7 +55,9 @@
 #include "memdbg.h"
 
 struct options_main options;
+struct pers_opts pers_opts; /* Not reset after forked resume */
 static char *field_sep_char_str, *show_uncracked_str, *salts_str;
+static char *encoding_str, *target_enc_str, *intermediate_enc_str;
 
 static struct opt_entry opt_list[] = {
 	{"", FLG_PASSWD, 0, 0, 0, OPT_FMT_ADD_LIST, &options.passwd},
@@ -65,8 +67,16 @@ static struct opt_entry opt_list[] = {
 		0, 0, OPT_FMT_STR_ALLOC, &options.wordlist},
 	{"loopback", FLG_LOOPBACK_SET, FLG_CRACKING_CHK,
 		0, 0, OPT_FMT_STR_ALLOC, &options.wordlist},
-	{"encoding", FLG_NONE, FLG_NONE,
-		0, 0, OPT_FMT_STR_ALLOC, &options.encoding},
+	/* -enc is a deprecated alias for -input-enc */
+	{"encoding", FLG_INPUT_ENC, FLG_INPUT_ENC,
+		0, 0, OPT_FMT_STR_ALLOC, &encoding_str},
+	{"input-encoding", FLG_INPUT_ENC, FLG_INPUT_ENC,
+		0, 0, OPT_FMT_STR_ALLOC, &encoding_str},
+	{"intermediate-encoding", FLG_SECOND_ENC, FLG_SECOND_ENC,
+		FLG_RULES, 0, OPT_FMT_STR_ALLOC,
+		&intermediate_enc_str},
+	{"target-encoding", FLG_SECOND_ENC, FLG_SECOND_ENC,
+		0, 0, OPT_FMT_STR_ALLOC, &target_enc_str},
 	{"stdin", FLG_STDIN_SET, FLG_CRACKING_CHK},
 #if HAVE_WINDOWS_H
 	{"pipe", FLG_PIPE_SET, FLG_CRACKING_CHK,
@@ -128,60 +138,61 @@ static struct opt_entry opt_list[] = {
 		FLG_CRACKING_CHK, FLG_STDIN_CHK | FLG_STDOUT | FLG_PIPE_CHK | OPT_REQ_PARAM,
 		"%u", &options.fork},
 #endif
-	{"pot", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"pot", FLG_POT, FLG_POT, 0, OPT_REQ_PARAM,
 	    OPT_FMT_STR_ALLOC, &options.loader.activepot},
 	{"format", FLG_FORMAT, FLG_FORMAT,
 		0, FLG_STDOUT | OPT_REQ_PARAM,
 		OPT_FMT_STR_ALLOC, &options.format},
-	{"subformat", FLG_NONE, FLG_NONE,
+	{"subformat", FLG_SUBFORMAT, FLG_SUBFORMAT,
 		0, FLG_STDOUT | OPT_REQ_PARAM,
 		OPT_FMT_STR_ALLOC, &options.subformat},
-	{"list", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"list", FLG_NONE, 0, 0, OPT_REQ_PARAM,
 		OPT_FMT_STR_ALLOC, &options.listconf},
 #ifdef HAVE_DL
 	{"plugin", FLG_DYNFMT, 0, 0, OPT_REQ_PARAM,
 		OPT_FMT_ADD_LIST_MULTI,	&options.fmt_dlls},
 #endif
-	{"mem-file-size", FLG_NONE, FLG_NONE, FLG_WORDLIST_CHK, FLG_DUPESUPP |
-		FLG_SAVEMEM | FLG_STDIN_CHK | FLG_PIPE_CHK | OPT_REQ_PARAM,
+	{"mem-file-size", FLG_MEM_FILE_SIZE, FLG_MEM_FILE_SIZE,
+		FLG_WORDLIST_CHK, (FLG_DUPESUPP | FLG_SAVEMEM |
+	        FLG_STDIN_CHK | FLG_PIPE_CHK | OPT_REQ_PARAM),
 		"%u", &options.max_wordfile_memory},
 	{"dupe-suppression", FLG_DUPESUPP, FLG_DUPESUPP, FLG_WORDLIST_CHK,
 		FLG_SAVEMEM | FLG_STDIN_CHK | FLG_PIPE_CHK},
-	{"fix-state-delay", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"fix-state-delay", FLG_NONE, 0, 0, OPT_REQ_PARAM,
 		"%u", &options.max_fix_state_delay},
-	{"field-separator-char", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"field-separator-char", FLG_FIELDSEP, FLG_FIELDSEP, 0, OPT_REQ_PARAM,
 		OPT_FMT_STR_ALLOC, &field_sep_char_str},
-	{"config", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"config", FLG_CONFIG, FLG_CONFIG, 0, OPT_REQ_PARAM,
 		OPT_FMT_STR_ALLOC, &options.config},
 	{"nolog", FLG_NOLOG, FLG_NOLOG},
 	{"log-stderr", FLG_LOG_STDERR | FLG_NOLOG, FLG_LOG_STDERR},
 	{"crack-status", FLG_CRKSTAT, FLG_CRKSTAT},
-	{"mkpc", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"mkpc", FLG_MKPC, FLG_MKPC, 0, OPT_REQ_PARAM,
 		"%u", &options.force_maxkeys},
-	{"min-length", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"min-length", FLG_MINLEN, FLG_MINLEN, 0, OPT_REQ_PARAM,
 		"%u", &options.force_minlength},
-	{"max-length", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"max-length", FLG_MAXLEN, FLG_MAXLEN, 0, OPT_REQ_PARAM,
 		"%u", &options.force_maxlength},
-	{"max-run-time", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"max-run-time", FLG_MAXRUN, FLG_MAXRUN, 0, OPT_REQ_PARAM,
 		"%u", &options.max_run_time},
-	{"progress-every", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"progress-every", FLG_PROGRESS, FLG_PROGRESS, 0, OPT_REQ_PARAM,
 		"%u", &options.status_interval},
-	{"regen-lost-salts", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"regen-lost-salts", FLG_REGEN, FLG_REGEN, 0, OPT_REQ_PARAM,
 		OPT_FMT_STR_ALLOC, &regen_salts_options},
-	{"bare-always-valid", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"bare-always-valid", FLG_BARE, FLG_BARE, 0, OPT_REQ_PARAM,
 		"%c", &options.dynamic_bare_hashes_always_valid},
 	{"reject-printable", FLG_REJECT_PRINTABLE, FLG_REJECT_PRINTABLE},
-	{"verbosity", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"verbosity", FLG_VERBOSITY, FLG_VERBOSITY, 0, OPT_REQ_PARAM,
 		"%u", &options.verbosity},
 #ifdef HAVE_OPENCL
-	{"platform", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"platform", FLG_PLATFORM, FLG_PLATFORM, 0, OPT_REQ_PARAM,
 		OPT_FMT_STR_ALLOC, &options.ocl_platform},
-	{"force-scalar", FLG_SCALAR, FLG_SCALAR},
-	{"force-vector-width", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
-		"%u", &options.v_width},
+	{"force-scalar", FLG_SCALAR, FLG_SCALAR, 0, FLG_VECTOR},
+	{"force-vector-width", FLG_VECTOR, FLG_VECTOR, 0,
+		(FLG_SCALAR | OPT_REQ_PARAM), "%u", &options.v_width},
 #endif
 #if defined(HAVE_OPENCL) || defined(HAVE_CUDA)
-	{"devices", FLG_NONE, FLG_NONE, 0, OPT_REQ_PARAM,
+	{"devices", FLG_DEVICE, FLG_DEVICE, 0, OPT_REQ_PARAM,
 		OPT_FMT_ADD_LIST_MULTI, &options.gpu_devices},
 #endif
 	{"skip-self-tests", FLG_NOTESTS, FLG_NOTESTS},
@@ -354,7 +365,7 @@ void opt_print_hidden_usage(void)
 	puts("--nolog                   disables creation and writing to john.log file");
 	puts("--log-stderr              log to screen instead of file");
 	puts("--bare-always-valid=C     if C is 'Y' or 'y', then the dynamic format will");
-	puts("                          always treat bare hashes as valid.");
+	puts("                          always treat bare hashes as valid");
 	puts("--progress-every=N        emit a status line every N seconds");
 	puts("--crack-status            emit a status line whenever a password is cracked");
 	puts("--max-run-time=N          gracefully exit after this many seconds");
@@ -363,6 +374,8 @@ void opt_print_hidden_usage(void)
 	puts("--reject-printable        reject printable binaries");
 	puts("--verbosity=N             change verbosity (1-5, default 3)");
 	puts("--skip-self-tests         skip self tests");
+	puts("--target-encoding=NAME    encoding used by format (see doc/ENCODING)");
+	puts("--intermediate-enc=NAME   encoding used in rules processing (see doc/ENCODING");
 #ifdef HAVE_DL
 	puts("--plugin=NAME[,..]        load this (these) dynamic plugin(s)");
 #endif
@@ -634,10 +647,27 @@ void opt_init(char *name, int argc, char **argv, int show_usage)
 	}
 #endif
 
-	if (options.encoding && !strcasecmp(options.encoding, "list")) {
+	/*
+	 * By default we are setup in 7 bit ascii mode (for rules) and
+	 * ISO-8859-1 codepage (for Unicode conversions).  We can change
+	 * that in john.conf or with the --encoding option.
+	 */
+	if ((encoding_str && !strcasecmp(encoding_str, "list")) ||
+	    (intermediate_enc_str &&
+	     !strcasecmp(intermediate_enc_str, "list")) ||
+	    (target_enc_str && !strcasecmp(target_enc_str, "list"))) {
 		listEncodings();
 		exit(0);
 	}
+
+	if (encoding_str)
+		pers_opts.input_enc = cp_name2id(encoding_str);
+
+	if (target_enc_str)
+		pers_opts.target_enc = cp_name2id(target_enc_str);
+
+	if (intermediate_enc_str)
+		pers_opts.intermediate_enc = cp_name2id(intermediate_enc_str);
 
 #ifdef HAVE_OPENCL
 	if (options.v_width) {
@@ -680,7 +710,7 @@ void opt_init(char *name, int argc, char **argv, int show_usage)
 		error();
 	}
 
-	if ( (options.flags & FLG_SHOW_SET) && show_uncracked_str) {
+	if ( (options.flags & FLG_SHOW_CHK) && show_uncracked_str) {
 		if (!strcasecmp(show_uncracked_str, "left"))  {
 			options.loader.showuncracked = 1;
 			// Note we 'do' want the pot file to load normally, but during that load,
@@ -705,7 +735,8 @@ void opt_init(char *name, int argc, char **argv, int show_usage)
 	options.regen_lost_salts = regen_lost_salt_parse_options();
 
 	if (field_sep_char_str) {
-		if (!strcasecmp(field_sep_char_str, "tab")) // Literal tab or TAB will mean 0x09 tab character
+		// Literal tab or TAB will mean 0x09 tab character
+		if (!strcasecmp(field_sep_char_str, "tab"))
 			field_sep_char_str = "\x09";
 		if (strlen(field_sep_char_str) == 1)
 			options.loader.field_sep_char = *field_sep_char_str;

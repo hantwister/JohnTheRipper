@@ -10,6 +10,7 @@
 #include "memory.h"
 #include "formats.h"
 #include "misc.h"
+#include "unicode.h"
 #ifndef BENCH_BUILD
 #include "options.h"
 #else
@@ -117,7 +118,7 @@ static int is_aligned(void *p, size_t align)
 		format->methods.set_key(buf_key, index); \
 	}
 
-#define MAXLABEL        "MAXLENGTH" /* must be upper-case chars only */
+#define MAXLABEL        "MAXLENGTH" /* must be upper-case ASCII chars only */
 static char *longcand(int index, int ml)
 {
 	static char out[PLAINTEXT_BUFFER_SIZE];
@@ -203,7 +204,8 @@ static char *fmt_self_test_body(struct fmt_main *format,
 #ifndef BENCH_BUILD
 	/* UTF-8 bodge in reverse. Otherwise we will get truncated keys back
 	   from the max-length self-test */
-	if ((options.utf8) && (format->params.flags & FMT_UTF8) &&
+	if ((pers_opts.target_enc == UTF_8) &&
+	    (format->params.flags & FMT_UTF8) &&
 	    (format->params.flags & FMT_UNICODE))
 		ml /= 3;
 #endif
@@ -367,12 +369,13 @@ static char *fmt_self_test_body(struct fmt_main *format,
 
 				if (strncmp(getkey, setkey, ml + 1)) {
 					if (fmt_strnlen(getkey, ml + 1) > ml)
-						sprintf(s_size, "max. length in index %d: wrote"
-						        " %d, got longer back", i, ml);
+					sprintf(s_size, "max. length in index "
+					        "%d: wrote %d, got longer back",
+					        i, ml);
 					else
-						sprintf(s_size, "max. length in index %d: wrote"
-						        " %d, got %d back", i, ml,
-						        (int)strlen(getkey));
+					sprintf(s_size, "max. length in index "
+					        "%d: wrote %d, got %d back", i,
+					        ml, (int)strlen(getkey));
 					return s_size;
 				}
 			}

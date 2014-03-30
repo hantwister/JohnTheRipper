@@ -63,12 +63,21 @@ int ldr_in_pot = 0;
 static char *no_username = "?";
 static int pristine_gecos;
 
+/* There should be legislation against adding a BOM to UTF-8 */
+static char *skip_bom(char *string)
+{
+	if (!memcmp(string, "\xEF\xBB\xBF", 3))
+		string += 3;
+	return string;
+}
+
 static void read_file(struct db_main *db, char *name, int flags,
 	void (*process_line)(struct db_main *db, char *line))
 {
 	struct stat file_stat;
 	FILE *file;
-	char line[LINE_BUFFER_SIZE];
+	char line_buf[LINE_BUFFER_SIZE], *line;
+	int warn = cfg_get_bool(SECTION_OPTIONS, NULL, "WarnEncoding", 0);
 
 	if (flags & RF_ALLOW_DIR) {
 		if (stat(name, &file_stat)) {
@@ -84,7 +93,34 @@ static void read_file(struct db_main *db, char *name, int flags,
 		pexit("fopen: %s", path_expand(name));
 	}
 
-	while (fgets(line, sizeof(line), file)) {
+	while (fgets(line_buf, sizeof(line_buf), file)) {
+		line = skip_bom(line_buf);
+
+		if (warn) {
+			char *u8check;
+
+			if (!(flags & RF_ALLOW_MISSING) ||
+			    !(u8check =
+			      strchr(line, options.loader.field_sep_char)))
+				u8check = line;
+
+			if (((flags & RF_ALLOW_MISSING) &&
+			     pers_opts.store_utf8) ||
+			    ((flags & RF_ALLOW_DIR) &&
+			     pers_opts.input_enc == UTF_8)) {
+				if (!valid_utf8((UTF8*)u8check)) {
+					warn = 0;
+					fprintf(stderr, "Warning: invalid UTF-8"
+					        " seen reading %s\n", name);
+				}
+			} else if (pers_opts.input_enc != UTF_8 &&
+			           (line != line_buf ||
+			            valid_utf8((UTF8*)u8check) > 1)) {
+				warn = 0;
+				fprintf(stderr, "Warning: UTF-8 seen reading "
+				        "%s\n", name);
+			}
+		}
 		process_line(db, line);
 		check_abort(0);
 	}
@@ -98,9 +134,6 @@ static void read_file(struct db_main *db, char *name, int flags,
 
 void ldr_init_database(struct db_main *db, struct db_options *options)
 {
-	pristine_gecos = cfg_get_bool(SECTION_OPTIONS, NULL,
-	        "PristineGecos", 0);
-
 	db->loaded = 0;
 
 	db->options = mem_alloc_copy(options,
@@ -221,6 +254,70 @@ static int ldr_check_shells(struct list_main *list, char *shell)
 	}
 
 	return 0;
+}
+
+static void ldr_set_encoding(struct fmt_main *format)
+{
+	static int print_once = 1;
+
+	if (pers_opts.default_enc && !pers_opts.target_enc &&
+	    (!strcasecmp(format->params.label, "LM") ||
+	     !strcasecmp(format->params.label, "netlm") ||
+	     !strcasecmp(format->params.label, "nethalflm"))) {
+		pers_opts.target_enc =
+			cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
+			                         "DefaultMSCodepage"));
+		if (pers_opts.target_enc)
+			pers_opts.default_target_enc = 1;
+		else
+			pers_opts.target_enc = pers_opts.input_enc;
+	} else if (pers_opts.intermediate_enc &&
+	           (format->params.flags & FMT_UNICODE) &&
+	           (format->params.flags & FMT_UTF8)) {
+		pers_opts.target_enc = pers_opts.intermediate_enc;
+	}
+
+	if ((options.flags & FLG_SHOW_CHK) || options.loader.showuncracked) {
+		initUnicode(UNICODE_UNICODE);
+		return;
+	}
+
+	/* john.conf alternative for --intermediate-encoding */
+	if ((!pers_opts.target_enc || pers_opts.target_enc == UTF_8) &&
+	    !pers_opts.intermediate_enc) {
+		pers_opts.intermediate_enc =
+			cp_name2id(cfg_get_param(SECTION_OPTIONS, NULL,
+			                        "DefaultIntermediateEncoding"));
+	}
+
+	/* Performance opportunity - avoid unneccessary conversions */
+	if ((!pers_opts.target_enc || pers_opts.target_enc == UTF_8) &&
+	    pers_opts.intermediate_enc && pers_opts.intermediate_enc != UTF_8) {
+		if ((format->params.flags & FMT_UNICODE) &&
+		    (format->params.flags & FMT_UTF8)) {
+			pers_opts.target_enc = pers_opts.intermediate_enc;
+			if (print_once)
+			log_event("- Rules engine using %s for Unicode",
+			          cp_id2name(pers_opts.target_enc));
+			if (john_main_process && options.verbosity > 2 &&
+				print_once)
+				fprintf(stderr, "Rules engine using %s for "
+				        "Unicode\n",
+				        cp_id2name(pers_opts.target_enc));
+		} else if (pers_opts.input_enc == UTF_8 &&
+		           pers_opts.target_enc == UTF_8 && print_once) {
+			log_event("- Rules engine using %s as intermediate "
+			          "encoding for Unicode",
+			          cp_id2name(pers_opts.intermediate_enc));
+			if (john_main_process)
+				fprintf(stderr, "Rules engine using %s as "
+				        "intermediate encoding for Unicode\n",
+				        cp_id2name(pers_opts.intermediate_enc));
+		}
+	}
+
+	print_once = 0;
+	initUnicode(UNICODE_UNICODE);
 }
 
 static int ldr_split_line(char **login, char **ciphertext,
@@ -358,6 +455,8 @@ static int ldr_split_line(char **login, char **ciphertext,
 			return valid;
 		}
 
+		ldr_set_encoding(*format);
+
 		alt = fmt_list;
 		do {
 			if (alt == *format)
@@ -427,6 +526,7 @@ static int ldr_split_line(char **login, char **ciphertext,
 		if (retval < 0) {
 			retval = valid;
 			*ciphertext = prepared;
+			ldr_set_encoding(alt);
 #ifdef HAVE_OPENCL
 			if (options.gpu_devices->count && options.fork)
 				*format = alt;
@@ -452,6 +552,16 @@ static int ldr_split_line(char **login, char **ciphertext,
 	} while ((alt = alt->next));
 
 	return retval;
+}
+
+static char* ldr_conv(char *word)
+{
+	if (pers_opts.input_enc == UTF_8 && pers_opts.target_enc != UTF_8) {
+		static char u8[PLAINTEXT_BUFFER_SIZE + 1];
+
+		word = utf8_to_cp_r(word, u8, PLAINTEXT_BUFFER_SIZE);
+	}
+	return word;
 }
 
 static void ldr_split_string(struct list_main *dst, char *src)
@@ -482,15 +592,15 @@ static struct list_main *ldr_init_words(char *login, char *gecos, char *home)
 	list_init(&words);
 
 	if (*login && login != no_username)
-		list_add(words, login);
-	ldr_split_string(words, gecos);
+		list_add(words, ldr_conv(login));
+	ldr_split_string(words, ldr_conv(gecos));
 	if (login != no_username)
-		ldr_split_string(words, login);
+		ldr_split_string(words, ldr_conv(login));
 	if (pristine_gecos && *gecos)
-		list_add_unique(words, gecos);
+		list_add_unique(words, ldr_conv(gecos));
 
 	if ((pos = strrchr(home, '/')) && pos[1])
-		list_add_unique(words, pos + 1);
+		list_add_unique(words, ldr_conv(&pos[1]));
 
 	return words;
 }
@@ -670,6 +780,9 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 		}
 
 		if (db->options->flags & DB_LOGIN) {
+			if (login != no_username)
+				login = ldr_conv(login);
+
 			if (count >= 2 && count <= 9) {
 				current_pw->login = mem_alloc_tiny(
 					strlen(login) + 3, MEM_ALIGN_NONE);
@@ -689,6 +802,9 @@ static void ldr_load_pw_line(struct db_main *db, char *line)
 
 void ldr_load_pw_file(struct db_main *db, char *name)
 {
+	pristine_gecos = cfg_get_bool(SECTION_OPTIONS, NULL,
+	        "PristineGecos", 0);
+
 	read_file(db, name, RF_ALLOW_DIR, ldr_load_pw_line);
 }
 
@@ -918,11 +1034,12 @@ static void ldr_sort_salts(struct db_main *db)
  */
 static void ldr_show_left(struct db_main *db, struct db_password *pw)
 {
-	if (!options.utf8 && options.report_utf8) {
-		UTF8 utf8login[PLAINTEXT_BUFFER_SIZE + 1];
+	if (pers_opts.target_enc != UTF_8 && pers_opts.report_utf8)
+	{
+		char utf8login[PLAINTEXT_BUFFER_SIZE + 1];
 
-		enc_to_utf8_r(pw->login, utf8login,
-		              PLAINTEXT_BUFFER_SIZE);
+		cp_to_utf8_r(pw->login, utf8login,
+		             PLAINTEXT_BUFFER_SIZE);
 		printf("%s%c%s\n", utf8login, db->options->field_sep_char,
 		       db->format->methods.source(pw->source, pw->binary));
 	} else
@@ -1220,7 +1337,7 @@ void ldr_show_pot_file(struct db_main *db, char *name)
 
 static void ldr_show_pw_line(struct db_main *db, char *line)
 {
-	int show;
+	int show, loop;
 	char source[LINE_BUFFER_SIZE];
 	struct fmt_main *format;
 	char *(*split)(char *ciphertext, int index, struct fmt_main *self);
@@ -1230,8 +1347,9 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 	int pass, found, chars;
 	int hash;
 	struct db_cracked *current;
-	UTF8 utf8login[LINE_BUFFER_SIZE + 1];
-	UTF8 utf8source[LINE_BUFFER_SIZE + 1];
+	char utf8login[LINE_BUFFER_SIZE + 1];
+	char utf8source[LINE_BUFFER_SIZE + 1];
+	char joined[PLAINTEXT_BUFFER_SIZE + 1] = "";
 
 	format = NULL;
 	count = ldr_split_line(&login, &ciphertext, &gecos, &home,
@@ -1243,14 +1361,17 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 
 	show = !(db->options->flags & DB_PLAINTEXTS);
 
+	if (options.flags & FLG_LOOPBACK_CHK)
+		show = !(loop = 1);
+
 	if (format) {
 		split = format->methods.split;
 		unify = format->params.flags & FMT_SPLIT_UNIFIES_CASE;
 		if (format->params.flags & FMT_UNICODE)
-			options.store_utf8 = cfg_get_bool(SECTION_OPTIONS,
+			pers_opts.store_utf8 = cfg_get_bool(SECTION_OPTIONS,
 			    NULL, "UnicodeStoreUTF8", 0);
 		else
-			options.store_utf8 = cfg_get_bool(SECTION_OPTIONS,
+			pers_opts.store_utf8 = cfg_get_bool(SECTION_OPTIONS,
 			    NULL, "CPstoreUTF8", 0);
 	} else {
 		split = fmt_default_split;
@@ -1258,11 +1379,11 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 		unify = 0;
 	}
 
-	if (!options.utf8 && !options.store_utf8 && options.report_utf8) {
-		login = (char*)enc_to_utf8_r(login, utf8login,
-		                             LINE_BUFFER_SIZE);
-		enc_to_utf8_r(source, utf8source, LINE_BUFFER_SIZE);
-		strnzcpy(source, (char*)utf8source, sizeof(source));
+	if (pers_opts.target_enc != UTF_8 &&
+	    !pers_opts.store_utf8 && pers_opts.report_utf8) {
+		login = cp_to_utf8_r(login, utf8login, LINE_BUFFER_SIZE);
+		cp_to_utf8_r(source, utf8source, LINE_BUFFER_SIZE);
+		strnzcpy(source, utf8source, sizeof(source));
 	}
 
 	if (!*ciphertext) {
@@ -1300,11 +1421,11 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 
 		if (pass) {
 			chars = 0;
-			if (show) {
+			if (show || loop) {
 				if (format)
 					chars = format->params.plaintext_length;
 				if (index < count - 1 && current &&
-				    (options.store_utf8 ?
+				    (pers_opts.store_utf8 ?
 				     (int)strlen8((UTF8*)current->plaintext) :
 				     (int)strlen(current->plaintext)) != chars)
 					current = NULL;
@@ -1313,12 +1434,14 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 			if (current) {
 				if (show) {
 					printf("%s", current->plaintext);
+				} else if (loop) {
+					strcat(joined, current->plaintext);
 				} else
 					list_add(db->plaintexts,
 						current->plaintext);
 
 				db->guess_count++;
-			} else
+			} else if (!loop)
 			while (chars--)
 				putchar('?');
 		} else
@@ -1336,7 +1459,22 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 		else
 			putchar('\n');
 	}
+	else if (found && loop) {
+		static int print = 1;
 
+		if (print) {
+			fprintf(stderr,
+			        "Assembling cracked LM halves for loopback\n");
+			print = 0;
+		}
+
+		/* list_add_unique is O(n^2) so we may skip dupe-checking */
+		if (db->password_count < 0x10000)
+			list_add_unique(db->plaintexts,
+			                ldr_conv(enc_strlwr(joined)));
+		else
+			list_add(db->plaintexts, ldr_conv(enc_strlwr(joined)));
+	}
 	if (format || found) db->password_count += count;
 }
 

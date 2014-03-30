@@ -46,6 +46,8 @@
 #include "cracker.h"
 #include "john.h"
 #include "memory.h"
+#include "unicode.h"
+#include "regex.h"
 #include "memdbg.h"
 
 static int dist_rules;
@@ -58,7 +60,7 @@ static long rec_pos; /* ftell(3) is defined to return a long */
 static unsigned long rec_line;
 
 static int rule_number, rule_count;
-static unsigned long line_number;
+static unsigned long line_number, loop_line_no;
 static int length;
 static struct rpp_context *rule_ctx;
 
@@ -209,12 +211,41 @@ static char *dummy_rules_apply(char *word, char *rule, int split, char *last)
 	return word;
 }
 
-static MAYBE_INLINE char *potword(char *line)
+/*
+ * This function does two separate things (either or both) just to confuse you.
+ * 1. In case we're in loopback mode, skip ciphertext and field separator.
+ * 2. Convert to target encoding, if applicable.
+ *
+ * It does both within the existing buffer - i.e. "right aligned" to the
+ * original EOL (the end result is guaranteed to fit).
+ */
+static MAYBE_INLINE char *convert(char *line)
 {
 	char *p;
 
-	p = strchr(line, options.loader.field_sep_char);
-	return p ? p + 1 : line;
+	if ((options.flags & FLG_LOOPBACK_CHK) &&
+	    (p = strchr(line, options.loader.field_sep_char)))
+		line = p + 1;
+
+	if (pers_opts.input_enc != pers_opts.target_enc) {
+		UTF16 u16[PLAINTEXT_BUFFER_SIZE + 1];
+		char *cp, *s, *d;
+		char e;
+		int len;
+
+		len = strcspn(line, "\n\r");
+		e = line[len];
+		line[len] = 0;
+		utf8_to_utf16(u16, PLAINTEXT_BUFFER_SIZE, (UTF8*)line, len);
+		line[len] = e;
+		cp = utf16_to_cp(u16);
+		d = &line[len];
+		s = &cp[strlen(cp)];
+		while (s > cp)
+			*--d = *--s;
+		line = d;
+	}
+	return line;
 }
 
 static unsigned int hash_log, hash_size, hash_mask;
@@ -425,10 +456,7 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 					}
 					if (!strncmp(line, "#!comment", 9))
 						continue;
-					if (loopBack)
-						lp = potword(file_line);
-					else
-						lp = file_line;
+					lp = convert(file_line);
 					if (!rules) {
 						lp[length] = '\n';
 						lp[length + 1] = 0;
@@ -456,10 +484,7 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 					}
 					if (!strncmp(line, "#!comment", 9))
 						continue;
-					if (loopBack)
-						lp = potword(file_line);
-					else
-						lp = file_line;
+					lp = convert(file_line);
 					if (!rules) {
 						lp[length] = '\n';
 						lp[length + 1] = 0;
@@ -559,8 +584,8 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules)
 					i--;
 					break;
 				}
-				if (loopBack && !myWordFileLines)
-					cp = potword(cp);
+				if (!myWordFileLines)
+					cp = convert(cp);
 				ep = cp;
 				while ((ep < aep) && *ep && *ep != '\n' && *ep != '\r') ep++;
 				ec = *ep;
@@ -744,6 +769,7 @@ SKIP_MEM_MAP_LOAD:;
 
 	rule_number = 0;
 	line_number = 0;
+	loop_line_no = 0;
 
 	if (init_once) {
 		init_once = 0;
@@ -814,6 +840,8 @@ SKIP_MEM_MAP_LOAD:;
 
 	if (prerule)
 	do {
+		struct list_entry *joined;
+
 		if (rules) {
 			if (dist_rules) {
 				int for_node =
@@ -841,6 +869,37 @@ SKIP_MEM_MAP_LOAD:;
 				goto next_rule;
 			}
 		}
+
+		/* Process loopback LM passwords that were put together
+		   at start of session */
+		if (loopBack)
+		if (rule)
+		if ((joined = db->plaintexts->head))
+		do {
+			if (options.node_count && !dist_rules) {
+				int for_node = loop_line_no %
+					options.node_count + 1;
+				int skip = for_node < options.node_min
+					|| for_node > options.node_max;
+				if (skip) {
+					loop_line_no++;
+					continue;
+				}
+			}
+			loop_line_no++;
+			if ((word = apply(joined->data, rule, -1, last))) {
+				last = word;
+
+				if (ext_filter(word))
+				if (regex ?
+				    do_regex_crack_as_rules(regex, word) :
+				    crk_process_key(word)) {
+					rules = 0;
+					pipe_input = 0;
+					break;
+				}
+			}
+		} while ((joined = joined->next));
 
 		if (rule && nWordFileLines)
 		while (line_number < nWordFileLines) {
@@ -880,10 +939,12 @@ SKIP_MEM_MAP_LOAD:;
 
 			if (line[0] != '#') {
 process_word:
-				if (loopBack)
-					memmove(line, potword(line),
-					        strlen(potword(line)) + 1);
-
+				if (pers_opts.input_enc != pers_opts.target_enc
+				    || loopBack) {
+					char *conv = convert(line);
+					int len = strlen(conv);
+					memmove(line, conv, len + 1);
+				}
 				if (!rules) {
 					if (minlength || maxlength) {
 						int len = strlen(line);
