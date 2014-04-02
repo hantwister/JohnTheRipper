@@ -358,7 +358,8 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules, char *regex)
 	int minlength = (options.force_minlength >= 0) ?
 		options.force_minlength : 0;
 
-	log_event("Proceeding with wordlist mode");
+	log_event("Proceeding with %s mode",
+	          loopBack ? "loopback" : "wordlist");
 	if (regex) {
 		if (!strstr(regex, "\\0")) {
 			// if there is NO 'baseword' contained within the rexgen, then we do not
@@ -397,16 +398,12 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules, char *regex)
 		char *cp, csearch;
 		int ourshare = 0;
 
-		if (loopBack) {
-			if (john_main_process)
-				fprintf(stderr, "Loop-back mode: Reading "
-				        "candidates from pot file %s\n", name);
-			log_event("- Using loop-back mode:");
-		}
-
 		if (!(word_file = fopen(path_expand(name), "rb")))
 			pexit("fopen: %s", path_expand(name));
-		log_event("- Wordlist file: %.100s", path_expand(name));
+		log_event("- %s file: %.100s",
+		          loopBack ? "Loopback pot" : "Wordlist",
+		          path_expand(name));
+		log_event("- Rules: %.100s", options.activewordlistrules);
 
 		/* this will both get us the file length, and tell us
 		   of 'invalid' files (i.e. too big in Win32 or other
@@ -516,7 +513,7 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules, char *regex)
 				if (nWordFileLines != myWordFileLines)
 					fprintf(stderr, "Warning: wordlist changed as we read it\n");
 				log_event("- loaded this node's share of wordfile %s into memory "
-				          "(%lu bytes of %lu, max_size=%u avg/node)",
+				          "(%lu bytes of %lu, max_size=%zu avg/node)",
 				          name, my_size, file_len, options.max_wordfile_memory);
 				if (john_main_process)
 					fprintf(stderr,"Each node loaded 1/%d "
@@ -529,7 +526,7 @@ void do_wordlist_crack(struct db_main *db, char *name, int rules, char *regex)
 				file_len = my_size;
 			}
 			else {
-				log_event("- loading wordfile %s into memory (%lu bytes, max_size=%u)",
+				log_event("- loading wordfile %s into memory (%lu bytes, max_size=%zu)",
 				          name, file_len, options.max_wordfile_memory);
 				if (options.node_count > 1 && john_main_process)
 					fprintf(stderr,"Each node loaded the whole wordfile to memory\n");
@@ -684,7 +681,7 @@ GRAB_NEXT_PIPE_LOAD:;
 				rules = rules_keep;
 				nWordFileLines = 0;
 				cpi = word_file_str;
-				cpe = (cpi + options.max_wordfile_memory) - (LINE_BUFFER_SIZE+1);
+				cpe = (cpi + options.max_wordfile_memory) - (LINE_BUFFER_SIZE + 1);
 				while (nWordFileLines < max_pipe_words) {
 					if (!fgetl(cpi, LINE_BUFFER_SIZE, word_file)) {
 						pipe_input = 0;
@@ -904,6 +901,7 @@ SKIP_MEM_MAP_LOAD:;
 				if (regex ?
 				    do_regex_crack_as_rules(regex, word) :
 				    crk_process_key(word)) {
+					rule = NULL;
 					rules = 0;
 					pipe_input = 0;
 					break;

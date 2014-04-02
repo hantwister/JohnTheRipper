@@ -79,6 +79,9 @@ static void read_file(struct db_main *db, char *name, int flags,
 	char line_buf[LINE_BUFFER_SIZE], *line;
 	int warn = cfg_get_bool(SECTION_OPTIONS, NULL, "WarnEncoding", 0);
 
+	if (!john_main_process)
+		warn = 0;
+
 	if (flags & RF_ALLOW_DIR) {
 		if (stat(name, &file_stat)) {
 			if (flags & RF_ALLOW_MISSING)
@@ -283,6 +286,7 @@ static void ldr_set_encoding(struct fmt_main *format)
 	}
 
 	/* john.conf alternative for --intermediate-encoding */
+	if (options.flags & FLG_RULES)
 	if ((!pers_opts.target_enc || pers_opts.target_enc == UTF_8) &&
 	    !pers_opts.intermediate_enc) {
 		pers_opts.intermediate_enc =
@@ -291,8 +295,8 @@ static void ldr_set_encoding(struct fmt_main *format)
 	}
 
 	/* Performance opportunity - avoid unneccessary conversions */
-	if ((!pers_opts.target_enc || pers_opts.target_enc == UTF_8) &&
-	    pers_opts.intermediate_enc && pers_opts.intermediate_enc != UTF_8) {
+	if (pers_opts.intermediate_enc && pers_opts.intermediate_enc != UTF_8 &&
+	    (!pers_opts.target_enc || pers_opts.target_enc == UTF_8)) {
 		if ((format->params.flags & FMT_UNICODE) &&
 		    (format->params.flags & FMT_UTF8)) {
 			pers_opts.target_enc = pers_opts.intermediate_enc;
@@ -1361,8 +1365,8 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 
 	show = !(db->options->flags & DB_PLAINTEXTS);
 
-	if (options.flags & FLG_LOOPBACK_CHK)
-		show = !(loop = 1);
+	if ((loop = (options.flags & FLG_LOOPBACK_CHK)))
+		show = 0;
 
 	if (format) {
 		split = format->methods.split;
@@ -1441,7 +1445,8 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 						current->plaintext);
 
 				db->guess_count++;
-			} else if (!loop)
+			} else
+			if (!loop)
 			while (chars--)
 				putchar('?');
 		} else
@@ -1459,21 +1464,14 @@ static void ldr_show_pw_line(struct db_main *db, char *line)
 		else
 			putchar('\n');
 	}
-	else if (found && loop) {
-		static int print = 1;
+	else if (*joined && found && loop) {
+		char *plain = ldr_conv(enc_strlwr(joined));
 
-		if (print) {
-			fprintf(stderr,
-			        "Assembling cracked LM halves for loopback\n");
-			print = 0;
-		}
-
-		/* list_add_unique is O(n^2) so we may skip dupe-checking */
-		if (db->password_count < 0x10000)
-			list_add_unique(db->plaintexts,
-			                ldr_conv(enc_strlwr(joined)));
-		else
-			list_add(db->plaintexts, ldr_conv(enc_strlwr(joined)));
+		/* list_add_unique is O(n^2) */
+		if (db->plaintexts->count < 0x10000)
+			list_add_unique(db->plaintexts, plain);
+		else if (strcmp(db->plaintexts->tail->data, plain))
+			list_add(db->plaintexts, plain);
 	}
 	if (format || found) db->password_count += count;
 }

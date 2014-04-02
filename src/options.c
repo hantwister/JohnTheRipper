@@ -155,7 +155,7 @@ static struct opt_entry opt_list[] = {
 	{"mem-file-size", FLG_MEM_FILE_SIZE, FLG_MEM_FILE_SIZE,
 		FLG_WORDLIST_CHK, (FLG_DUPESUPP | FLG_SAVEMEM |
 	        FLG_STDIN_CHK | FLG_PIPE_CHK | OPT_REQ_PARAM),
-		"%u", &options.max_wordfile_memory},
+		"%zu", &options.max_wordfile_memory},
 	{"dupe-suppression", FLG_DUPESUPP, FLG_DUPESUPP, FLG_WORDLIST_CHK,
 		FLG_SAVEMEM | FLG_STDIN_CHK | FLG_PIPE_CHK},
 	{"fix-state-delay", FLG_NONE, 0, 0, OPT_REQ_PARAM,
@@ -546,7 +546,8 @@ void opt_init(char *name, int argc, char **argv, int show_usage)
 		}
 	}
 
-	if (options.verbosity < 1 || options.verbosity > 5) {
+	if (options.flags & FLG_VERBOSITY &&
+	    (options.verbosity < 1 || options.verbosity > 5)) {
 		if (john_main_process)
 			fprintf(stderr, "Invalid --verbosity level, use 1-5\n");
 		error();

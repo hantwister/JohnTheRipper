@@ -205,6 +205,8 @@ extern struct fmt_main fmt_opencl_keyring;
 extern struct fmt_main fmt_opencl_pbkdf2_hmac_sha256;
 extern struct fmt_main fmt_opencl_pbkdf2_hmac_sha512;
 extern struct fmt_main fmt_opencl_rakp;
+extern struct fmt_main fmt_opencl_o5logon;
+extern struct fmt_main fmt_opencl_o5logon_aesni;
 #endif
 #ifdef HAVE_CUDA
 extern struct fmt_main fmt_cuda_cryptmd5;
@@ -442,6 +444,8 @@ static void john_register_all(void)
 	john_register_one(&fmt_opencl_pbkdf2_hmac_sha256);
 	john_register_one(&fmt_opencl_pbkdf2_hmac_sha512);
 	john_register_one(&fmt_opencl_rakp);
+	john_register_one(&fmt_opencl_o5logon);
+	john_register_one(&fmt_opencl_o5logon_aesni);
 #endif
 
 #ifdef HAVE_CUDA
@@ -863,6 +867,21 @@ static void john_load_conf(void)
 {
 	int intermediate, target;
 
+	if (!(options.flags & FLG_VERBOSITY)) {
+		options.verbosity = cfg_get_int(SECTION_OPTIONS, NULL,
+		                                "Verbosity");
+
+		if (options.verbosity == -1)
+			options.verbosity = 3;
+
+		if (options.verbosity < 1 || options.verbosity > 5) {
+			if (john_main_process)
+				fprintf(stderr, "Invalid verbosity "
+				        "level in config file, use 1-5\n");
+			error();
+		}
+	}
+
 	if (options.loader.activepot == NULL) {
 		if (options.secure)
 			options.loader.activepot = str_alloc_copy(SEC_POT_NAME);
@@ -880,7 +899,7 @@ static void john_load_conf(void)
 	if (options.activesinglerules == NULL)
 		if (!(options.activesinglerules =
 		      cfg_get_param(SECTION_OPTIONS, NULL,
-		                    "BatchModeSingleRules")))
+		                    "SingleRules")))
 			options.activesinglerules =
 				str_alloc_copy(SUBSECTION_SINGLE);
 
@@ -988,26 +1007,24 @@ static void john_load_conf_db(void)
 		exit(0);
 	}
 
-	if (options.verbosity > 2) {
-		if (pers_opts.default_enc && john_main_process &&
-		    pers_opts.input_enc != ASCII)
-			fprintf(stderr, "Using default input encoding: %s\n",
-			        cp_id2name(pers_opts.input_enc));
+	if (pers_opts.default_enc && john_main_process &&
+	    pers_opts.input_enc != ASCII)
+		fprintf(stderr, "Using default input encoding: %s\n",
+		        cp_id2name(pers_opts.input_enc));
 
-		if (pers_opts.target_enc != pers_opts.input_enc &&
-		    (!database.format ||
-		     !(database.format->params.flags & FMT_UNICODE))) {
-			log_event("- Target encoding: %s",
-			          cp_id2name(pers_opts.target_enc));
-			if (john_main_process) {
-				if (pers_opts.default_target_enc)
-					fprintf(stderr, "Using default target "
-					        "encoding: %s\n",
-					      cp_id2name(pers_opts.target_enc));
-				else
-					fprintf(stderr, "Target encoding: %s\n",
-					      cp_id2name(pers_opts.target_enc));
-			}
+	if (pers_opts.target_enc != pers_opts.input_enc &&
+	    (!database.format ||
+	     !(database.format->params.flags & FMT_UNICODE))) {
+		log_event("- Target encoding: %s",
+		          cp_id2name(pers_opts.target_enc));
+		if (john_main_process) {
+			if (pers_opts.default_target_enc)
+				fprintf(stderr, "Using default target "
+				        "encoding: %s\n",
+				        cp_id2name(pers_opts.target_enc));
+			else
+				fprintf(stderr, "Target encoding: %s\n",
+				        cp_id2name(pers_opts.target_enc));
 		}
 	}
 }
@@ -1169,6 +1186,15 @@ static void john_load(void)
 			ldr_show_pw_file(&loop_db, current->data);
 		} while ((current = current->next));
 
+		if (loop_db.plaintexts->count) {
+			log_event("- Reassembled %d split passwords for "
+			          "loopback", loop_db.plaintexts->count);
+			if (john_main_process && options.verbosity > 3)
+				fprintf(stderr,
+				        "Reassembled %d split passwords for "
+				        "loopback\n",
+				        loop_db.plaintexts->count);
+		}
 		database.plaintexts = loop_db.plaintexts;
 		options.loader.flags &= ~DB_CRACKED;
 		fmt_list = save_list;
