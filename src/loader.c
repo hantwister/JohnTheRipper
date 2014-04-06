@@ -286,7 +286,7 @@ static void ldr_set_encoding(struct fmt_main *format)
 	}
 
 	/* john.conf alternative for --intermediate-encoding */
-	if (options.flags & FLG_RULES)
+	if (options.flags & (FLG_RULES | FLG_BATCH_CHK))
 	if ((!pers_opts.target_enc || pers_opts.target_enc == UTF_8) &&
 	    !pers_opts.intermediate_enc) {
 		pers_opts.intermediate_enc =
