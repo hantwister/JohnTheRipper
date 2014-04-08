@@ -12,7 +12,7 @@
 #include "memdbg.h"
 
 #define FORMAT_LABEL			"xsha512"
-#define FORMAT_NAME			"Mac OS X 10.7+"
+#define FORMAT_NAME			"Mac OS X 10.7"
 #if ARCH_BITS >= 64
 #define ALGORITHM_NAME			"SHA512 64/" ARCH_BITS_STR " " SHA2_LIB
 #else

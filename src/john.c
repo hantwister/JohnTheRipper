@@ -1038,16 +1038,15 @@ static void john_load_conf_db(void)
 		}
 	}
 
-	if (pers_opts.intermediate_enc != pers_opts.target_enc) {
-		if (pers_opts.intermediate_enc != UTF_8) {
+	if (pers_opts.input_enc != pers_opts.intermediate_enc) {
+		if (pers_opts.intermediate_enc == pers_opts.target_enc) {
 			log_event("- Rules engine using %s for Unicode",
 			          cp_id2name(pers_opts.intermediate_enc));
 			if (john_main_process)
 				fprintf(stderr, "Rules engine using %s for "
 				        "Unicode\n",
 				        cp_id2name(pers_opts.intermediate_enc));
-		} else if (pers_opts.input_enc == UTF_8 &&
-		           pers_opts.target_enc == UTF_8) {
+		} else {
 			log_event("- Rules engine using %s as intermediate "
 			          "encoding for Unicode",
 			          cp_id2name(pers_opts.intermediate_enc));
@@ -1265,8 +1264,13 @@ static void john_load(void)
 		}
 
 #if OS_FORK
-		if (options.fork)
+		if (options.fork) {
+			/*
+			 * flush before forking, to avoid multple log entries
+			 */
+			log_flush();
 			john_fork();
+		}
 #endif
 #ifdef HAVE_MPI
 		if (mpi_p > 1)
@@ -1441,10 +1445,18 @@ static void john_run(void)
 			log_init(LOG_NAME, options.loader.activepot,
 			         options.session);
 			status_init(NULL, 1);
-			john_log_format();
-			if (idle_requested(database.format))
-				log_event("- Configured to use otherwise idle "
-					"processor cycles only");
+			if (john_main_process) {
+				john_log_format();
+				if (idle_requested(database.format))
+					log_event("- Configured to use otherwise idle "
+					          "processor cycles only");
+				/*
+				 * flush log entries to make sure they appear
+				 * before the "Proceeding with ... mode" entries
+				 * of other processes
+				 */
+				log_flush();
+			}
 		}
 		tty_init(options.flags & FLG_STDIN_CHK);
 
