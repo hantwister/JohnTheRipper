@@ -1042,7 +1042,8 @@ static void john_load_conf_db(void)
 		if (pers_opts.intermediate_enc == pers_opts.target_enc) {
 			log_event("- Rules engine using %s for Unicode",
 			          cp_id2name(pers_opts.intermediate_enc));
-			if (john_main_process)
+			if (john_main_process &&
+			    (database.format->params.flags & FMT_UNICODE))
 				fprintf(stderr, "Rules engine using %s for "
 				        "Unicode\n",
 				        cp_id2name(pers_opts.intermediate_enc));
@@ -1095,6 +1096,8 @@ static void john_load(void)
 		memset(&dummy_format, 0, sizeof(dummy_format));
 		dummy_format.params.plaintext_length = options.length;
 		dummy_format.params.flags = FMT_CASE | FMT_8_BIT;
+		if (pers_opts.report_utf8)
+			dummy_format.params.flags |= FMT_UTF8;
 		dummy_format.params.label = "stdout";
 		dummy_format.methods.clear_keys = &fmt_default_clear_keys;
 
@@ -1104,6 +1107,9 @@ static void john_load(void)
 
 	if (options.flags & FLG_PASSWD) {
 		int total;
+#if FMT_MAIN_VERSION > 11
+		int i;
+#endif
 
 		if (options.flags & FLG_SHOW_CHK) {
 			options.loader.flags |= DB_CRACKED;
@@ -1187,7 +1193,21 @@ static void john_load(void)
 			if (john_main_process)
 			printf("Remaining %s\n", john_loaded_counts());
 		}
-
+#if FMT_MAIN_VERSION > 11
+		for (i = 0; i < FMT_TUNABLE_COSTS; i++) {
+			if (database.min_cost[i] < database.max_cost[i]) {
+				log_event("Loaded hashes with cost %d (%s)"
+				          " varying from %u to %u",
+				          i+1, database.format->params.tunable_cost_name[i],
+				          database.min_cost[i], database.max_cost[i]);
+				if (john_main_process)
+					printf("Loaded hashes with cost %d (%s)"
+					       " varying from %u to %u\n",
+					       i+1, database.format->params.tunable_cost_name[i],
+					        database.min_cost[i], database.max_cost[i]);
+			}
+		}
+#endif
 		if ((options.flags & FLG_PWD_REQ) && !database.salts) exit(0);
 
 		if (options.regen_lost_salts)

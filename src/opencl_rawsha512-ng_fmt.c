@@ -660,6 +660,10 @@ struct fmt_main fmt_opencl_rawsha512_ng = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		raw_tests
 	}, {
 		init,
@@ -670,6 +674,10 @@ struct fmt_main fmt_opencl_rawsha512_ng = {
 		split,
 		get_binary,
 		fmt_default_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		fmt_default_source,
 		{
 			binary_hash_0,
@@ -716,6 +724,10 @@ struct fmt_main fmt_opencl_xsha512_ng = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_SPLIT_UNIFIES_CASE,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		x_tests
 	}, {
 		init_x,
@@ -726,6 +738,10 @@ struct fmt_main fmt_opencl_xsha512_ng = {
 		split_x,
 		get_binary,
 		get_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		fmt_default_source,
 		{
 			binary_hash_0,

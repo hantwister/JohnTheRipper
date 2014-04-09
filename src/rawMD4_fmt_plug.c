@@ -372,6 +372,10 @@ struct fmt_main fmt_rawMD4 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP | FMT_OMP_BAD,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		tests
 	}, {
 		init,
@@ -382,6 +386,10 @@ struct fmt_main fmt_rawMD4 = {
 		split,
 		binary,
 		fmt_default_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		source,
 		{
 			fmt_default_binary_hash_0,

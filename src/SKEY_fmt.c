@@ -232,6 +232,10 @@ struct fmt_main fmt_SKEY = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		skey_tests
 	}, {
 		fmt_default_init,
@@ -242,6 +246,10 @@ struct fmt_main fmt_SKEY = {
 		fmt_default_split,
 		fmt_default_binary,
 		skey_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash,

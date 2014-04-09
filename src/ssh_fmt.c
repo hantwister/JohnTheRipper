@@ -424,6 +424,10 @@ struct fmt_main fmt_ssh = {
 		FMT_OMP |
 #endif
 		FMT_CASE | FMT_8_BIT,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		ssh_tests
 	}, {
 		init,
@@ -434,6 +438,10 @@ struct fmt_main fmt_ssh = {
 		fmt_default_split,
 		fmt_default_binary,
 		get_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash

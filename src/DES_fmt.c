@@ -379,6 +379,10 @@ struct fmt_main fmt_DES = {
 #else
 		FMT_CASE,
 #endif
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		tests
 	}, {
 		init,
@@ -394,6 +398,10 @@ struct fmt_main fmt_DES = {
 			DES_std_get_binary,
 #endif
 		salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		fmt_default_source,
 		{
 			binary_hash_0,

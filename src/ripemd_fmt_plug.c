@@ -227,6 +227,10 @@ struct fmt_main fmt_ripemd_160 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		ripemd_160_tests
 	}, {
 		init,
@@ -237,6 +241,10 @@ struct fmt_main fmt_ripemd_160 = {
 		fmt_default_split,
 		get_binary_160,
 		fmt_default_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,
@@ -284,6 +292,10 @@ struct fmt_main fmt_ripemd_128 = {
 		MIN_KEYS_PER_CRYPT,
 		MAX_KEYS_PER_CRYPT,
 		FMT_CASE | FMT_8_BIT | FMT_OMP,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		ripemd_128_tests
 	}, {
 		init,
@@ -294,6 +306,10 @@ struct fmt_main fmt_ripemd_128 = {
 		fmt_default_split,
 		get_binary_128,
 		fmt_default_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 		fmt_default_source,
 		{
 			fmt_default_binary_hash_0,

@@ -487,6 +487,10 @@ struct fmt_main fmt_opencl_pbkdf2_hmac_sha256 = {
 	1,
 	1,
 	FMT_CASE | FMT_8_BIT,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 	tests
 }, {
 	init,
@@ -497,6 +501,10 @@ struct fmt_main fmt_opencl_pbkdf2_hmac_sha256 = {
 	fmt_default_split,
 	binary,
 	get_salt,
+#if FMT_MAIN_VERSION > 11
+		{
+		},
+#endif
 	fmt_default_source,
 	{
 		binary_hash_0,
